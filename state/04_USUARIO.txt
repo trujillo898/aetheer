@@ -1,0 +1,111 @@
+AETHEER — PERFIL DE USUARIO Y CASOS DE USO
+
+================================================================================
+QUIÉN USA AETHEER
+================================================================================
+
+Trader independiente de Forex con experiencia intermedia a avanzada que:
+- Opera EURUSD y GBPUSD en intradía 
+- Base sólida en análisis técnico, falta profundidad macro/fundamental
+- Toma decisiones propias — no delega a bots ni señales
+- Busca ventaja informacional, no automatización
+- Usa TradingView con feed de OANDA para sus gráficos
+- Zona horaria: America/Santiago (Chile)
+- Sesiones de interés: Londres, solapamiento Londres-NY
+
+================================================================================
+DOLOR QUE RESUELVE
+================================================================================
+
+"No tengo tiempo para revisar 10 fuentes cada mañana"
+→ Análisis integrado en un solo output
+
+"Entré en un trade y luego había un evento que no vi"
+→ Evaluación de riesgo de eventos antes de operar
+
+"No sé si esta sesión tiene buena liquidez"
+→ Motor de liquidez con ventanas óptimas
+
+"El precio se movió fuerte y no entiendo por qué"
+→ Cadena causal explícita con grafo formal
+
+"Mi análisis técnico dice largo, pero algo se siente raro"
+→ Contexto macro que confirma o cuestiona el setup
+
+"No distingo entre movimiento real y manipulación"
+→ Evaluación de lógica del movimiento vs condiciones
+
+"¿Qué tan confiable es lo que me dice el sistema?"
+→ Confidence score desglosado por dimensión
+
+================================================================================
+CASOS DE USO PRINCIPALES
+================================================================================
+
+CASO 1: Pre-mercado
+- Escenario: el trader abre su sesión y necesita contexto
+- Input: "análisis completo"
+- Expectativa: estado completo en 1.000-1.400 palabras, <2 min de lectura
+- Incluye: DXY, política monetaria, macro, sesión activa, riesgo eventos,
+  sesgo del dólar con cadena causal, dirección pares, confidence score
+
+CASO 2: Validación de setup
+- Escenario: identificó setup técnico, quiere validación macro
+- Input: "estoy viendo un largo en EURUSD en Londres, ¿contexto apoya?"
+- Expectativa: 50-200 palabras. FAVORABLE / DESFAVORABLE / NEUTRAL con causa.
+
+CASO 3: Evento en curso
+- Escenario: acaba de salir un dato económico
+- Input: "¿qué pasó con el CPI?"
+- Expectativa: resultado vs consenso, reacción, ¿descontado?, ¿lógico o manipulado?
+
+CASO 4: Movimiento sin causa aparente
+- Escenario: precio se movió fuerte sin noticia visible
+- Input: "EURUSD cayó 50 pips en 10 min, ¿por qué?"
+- Expectativa: causa si existe, o "no hay causa identificada" + evaluación
+  de liquidez y posible manipulación
+
+CASO 5: Cuestionar el propio sesgo
+- Escenario: el trader quiere argumentos en contra de su lectura
+- Input: "tengo sesgo alcista en EURUSD, dame argumentos en contra"
+- Expectativa: contraargumentos reales, no genéricos
+
+CASO 6: Post-mortem
+- Escenario: el sesgo fue incorrecto, quiere entender por qué
+- Input: "el sesgo era alcista y el mercado cayó, ¿qué falló?"
+- Expectativa: análisis honesto de la falla sin excusas
+
+CASO 7: Diagnóstico del sistema
+- Input: "status"
+- Expectativa: reporte compacto de salud, fuentes, agentes, datos
+
+================================================================================
+EXPERIENCIA DESEADA
+================================================================================
+
+Lo que debe sentir:
+- Confianza: la información es real, con fuente, timestamp y confidence
+- Claridad: sin ambigüedad ni relleno
+- Velocidad: el análisis está listo cuando lo necesita
+- Complementariedad: potencia su análisis técnico, no lo reemplaza
+- Control: el usuario decide, Aetheer informa
+- Transparencia: sabe qué tan confiable es cada parte del análisis
+
+Lo que nunca debe sentir:
+- Que el sistema alucinó un dato
+- Que la respuesta fue genérica
+- Que le están vendiendo una señal disfrazada de análisis
+- Que tiene que leer 3.000 palabras para encontrar lo que necesita
+- Que el sistema ignoró un riesgo evidente
+- Que no sabe qué tan confiable es lo que le dicen
+
+================================================================================
+EVOLUCIÓN
+================================================================================
+
+Semana 1: usa análisis completo cada día, valida contra su lectura
+Mes 1: empieza preguntas puntuales, confía en el sesgo
+Mes 3: usa Aetheer como filtro previo — si contexto no es favorable, no opera
+Mes 6+: ha internalizado la lógica macro, usa Aetheer para confirmar y detectar inconsistencias
+
+Objetivo: educación progresiva, no dependencia.

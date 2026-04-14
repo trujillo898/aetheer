@@ -1,0 +1,150 @@
+AETHEER — CONTEXT ENGINEERING
+
+================================================================================
+PRINCIPIO
+================================================================================
+
+Aetheer es nativo de Context Engineering. El contexto no es un historial
+pasivo. Es un recurso activo, finito y perecedero que se construye, mantiene,
+comprime, prioriza y olvida de manera inteligente.
+
+Más contexto no es mejor contexto.
+El contexto CORRECTO, en el momento CORRECTO, con la granularidad CORRECTA.
+
+================================================================================
+CAPAS DE MEMORIA
+================================================================================
+
+CORTO PLAZO (sesión actual):
+- Sin comprimir
+- Eviction: LRU (Least Recently Used)
+- Contenido: consulta activa, precio actual, sesión de mercado,
+  último output de cada agente, intención inferida
+
+MEDIO PLAZO (14 días):
+- Compresión: resumen semántico
+- Eviction: relevance decay
+- Contenido: sesgo macro vigente, eventos recientes, últimos análisis,
+  estado de agentes, contradicciones detectadas
+
+LARGO PLAZO (6 meses):
+- Compresión: agregación estadística
+- Eviction: time decay + low access count
+- Contenido: patrones estacionales, impacto histórico de eventos,
+  baselines de volatilidad, preferencias del usuario
+
+EPISODIC MEMORY (especial):
+- Sin límite temporal fijo (basado en utilidad causal)
+- Almacena eventos completos con grafo causal íntegro
+- Recuperación por similitud causal, no solo semántica
+- Permite: "¿qué pasó la última vez que hubo CPI hawkish con yields < 4.2%?"
+
+================================================================================
+DIMENSIONES DE CADA PIEZA DE CONTEXTO
+================================================================================
+
+- Contenido: el dato o información en sí
+- Relevancia temporal: cuánto importa ahora vs hace N días
+- Prioridad: peso relativo frente a otras piezas
+- Origen: qué agente o fuente lo generó
+- Quality score: confiabilidad del dato (del Data Integrity Agent)
+- Causal weight: importancia dentro del grafo causal activo
+- Estado: activo / comprimido / archivado / olvidado
+- Dependencias: otras piezas que necesita para tener sentido
+
+================================================================================
+TIME DECAY
+================================================================================
+
+relevancia_actual = relevancia_base × decay_factor^(días_transcurridos)
+
+Tipo de información     | decay_factor | Vida útil efectiva
+Precio actual           | 0.01         | Minutos
+Reacción a evento       | 0.85         | 7-10 días
+Sesgo macro             | 0.95         | 30-60 días
+Patrón estacional       | 0.99         | ~6 meses
+Preferencia de usuario  | 0.995        | ~12 meses
+Lección aprendida       | 0.995        | ~12 meses (alta persistencia)
+
+Eliminación cuando relevancia < 0.05
+Excepción: Episodic Memory usa utilidad causal, no solo tiempo.
+
+================================================================================
+COMPRESIÓN SEMÁNTICA
+================================================================================
+
+Cuando una pieza envejece pero sigue siendo relevante:
+
+ANTES (literal, ~800 tokens):
+"El 15 de marzo se publicó el CPI de febrero en 0.4% vs 0.3% esperado.
+El DXY reaccionó con spike de +0.45% en 47 minutos. EURUSD cayó 62 pips.
+El mercado no lo tenía descontado. La reacción fue hawkish..."
+
+DESPUÉS (comprimido, ~90 tokens):
+{event: "US_CPI_Feb", surprise: "hawkish_+0.1pct",
+ dxy_reaction: "+0.45%_47min", priced_in: false,
+ classification: "high_impact_hawkish"}
+
+Ratio objetivo: 8:1 a 12:1 (medio plazo), 20:1+ (largo plazo)
+
+================================================================================
+RAG MULTI-CAPA
+================================================================================
+
+Nivel 1: tiempo real (precios, calendario, noticias de hoy)
+Nivel 2: memoria interna (sesión, análisis recientes)
+Nivel 3: conocimiento estructurado (reglas macro, patrones, lecciones)
+
+Ranking: relevancia × frescura × peso causal × attention_weight
+
+No toda la memoria se carga en cada consulta. Solo lo relevante al tema,
+al momento y a la intención del usuario.
+
+================================================================================
+ANTI-PATRONES
+================================================================================
+
+Overloading: demasiado contexto, ruido en los agentes
+  → Detectar: utilización > 90% + fragmentación alta
+  → Acción: poda agresiva, comprimir medio plazo
+
+Underflow: muy poco contexto, respuestas superficiales
+  → Detectar: utilización < 30%
+  → Acción: recuperar más de medio/largo plazo
+
+Redundancia: misma información en múltiples formas
+  → Detectar: duplicados semánticos
+  → Acción: unificar en entrada canónica
+
+Eco: repetir al usuario lo que ya sabe
+  → Detectar: overlap con outputs recientes
+  → Acción: omitir información ya entregada
+
+Fragmentación: piezas relacionadas dispersas sin conexión
+  → Detectar: coherencia baja entre piezas
+  → Acción: reagrupar por cadena causal
+
+================================================================================
+SESSION BRIDGING
+================================================================================
+
+Cuando el usuario regresa después de horas o días:
+
+1. Calcular gap temporal desde última interacción
+2. Identificar qué cambió en el mercado durante el gap
+3. Comprimir el gap en un bridge summary
+4. Inyectar al inicio del contexto activo
+5. Responder con continuidad, sin repetir lo que el usuario ya sabía
+
+================================================================================
+PERFIL CONTEXTUAL DEL USUARIO
+================================================================================
+
+Evoluciona con cada interacción:
+- Frecuencia de interacción
+- Nivel de detalle preferido
+- Tópicos recurrentes (ej: pregunta EURUSD 3x más que GBPUSD)
+- Patrón típico de consulta (ej: análisis completo por la mañana, puntuales después)
+- Sesión preferida
+- Patrones detectados
+- Configurable explícitamente por el usuario ("prefiero análisis cortos")

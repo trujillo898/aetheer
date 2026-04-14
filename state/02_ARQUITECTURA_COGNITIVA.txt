@@ -1,0 +1,452 @@
+AETHEER — ARQUITECTURA COGNITIVA
+
+================================================================================
+0. PRINCIPIO RECTOR
+================================================================================
+
+El sistema NO predice.
+Contextualiza, evalúa causalidad y prioriza información con agentes
+especializados que colaboran bajo supervisión estricta.
+
+Cada output debe obligatoriamente contener:
+- Causa clara (cadena causal formal)
+- Contexto relevante (filtrado, no acumulado)
+- Nivel de confianza desglosado por dimensión
+- Ser completamente auditable
+
+================================================================================
+0.1 ARQUITECTURA GENERAL
+================================================================================
+
+- Orchestrator Agent: coordina flujo, activa agentes, controla costo/latencia
+- Governor Agent: supervisa coherencia, puede vetar outputs
+- Multi-Agent System: agentes especializados trabajan en paralelo
+- Causal AI Formal: Structural Causal Models (SCM) + Counterfactual Reasoning
+- Tool-Augmented: todos los agentes pueden llamar herramientas externas
+- Self-Reflection + MARL: aprendizaje continuo mediante crítica interna
+- Confidence Service: transversal, cualquier agente puede consultar confiabilidad
+- Operating Modes: full / degraded / minimal / offline
+
+================================================================================
+0.2 FLUJO GENERAL
+================================================================================
+
+USER QUERY
+  │
+  ▼
+ORCHESTRATOR AGENT
+  ├── Parsea intención
+  ├── Activa Attention Mechanism → tema dominante del mercado
+  ├── Decide plan: qué agentes, qué profundidad, qué datos
+  ├── Rejection Gate: descarta inputs irrelevantes
+  └── Determina Operating Mode
+  │
+  ▼
+PERCEPTION AGENTS (paralelo)
+  ├── Price Agent
+  ├── News Agent
+  ├── Macro Agent
+  └── [futuro: Alternative Data Agent]
+  │
+  ▼
+DATA INTEGRITY AGENT (gate)
+  ├── Quality score por dato (0.0-1.0)
+  ├── Anomaly detection
+  ├── Kill Switch si quality < umbral
+  └── Propaga quality scores downstream
+  │
+  ▼
+INTERPRETATION AGENTS (paralelo)
+  ├── Liquidity Agent
+  ├── Price Behavior Agent
+  ├── Macro Pressure Agent
+  └── Regime Detection Agent
+  │
+  ▼
+CAUSAL ENGINE
+  ├── Construye SCM dinámico
+  ├── Consulta lecciones previas (Episodic Memory)
+  ├── Elimina correlaciones espurias
+  ├── Genera contrafactuales
+  └── Output: grafo causal + variables dominantes + contrafactuales
+  │
+  ▼
+CONTEXT ENGINE
+  ├── Selecciona contexto relevante (RAG multi-capa)
+  ├── Aplica attention weights del Orchestrator
+  ├── Compresión + eliminación de redundancia
+  └── Output: contexto optimizado
+  │
+  ▼
+GOVERNOR AGENT (validación pre-output)
+  ├── Revisa coherencia entre todos los agentes
+  ├── Detecta contradicciones
+  ├── Puede VETAR y pedir re-procesamiento
+  └── Valida que el output sea auditable
+  │
+  ▼
+SIMULATION ENGINE
+  ├── Escenarios con condiciones de activación
+  ├── Kill conditions por escenario (qué lo invalida)
+  ├── Ventana temporal + liquidez esperada
+  └── Counterfactual simulations
+  │
+  ▼
+SYNTHESIS AGENT (output final)
+  ├── Integra todo
+  ├── Confidence Score global (del servicio transversal)
+  ├── Cadena causal principal
+  ├── Formato según intención (completo/puntual/dato)
+  └── Output auditable
+  │
+  ▼
+MEMORY SYSTEM (post-output)
+  ├── Almacena en capa correspondiente
+  ├── Almacena grafo causal en Episodic Memory
+  ├── Actualiza perfil de usuario
+  └── Time decay
+  │
+  ▼
+LEARNING LOOP (async, 24-48h después)
+  ├── Reflection Agent compara sesgo vs realidad
+  ├── Genera Lesson Learned
+  ├── Ajusta weights en Causal Engine
+  └── MARL ligero
+
+================================================================================
+1. ORCHESTRATOR AGENT (nivel ejecutivo)
+================================================================================
+
+FUNCIONES:
+- Parsear intención del usuario:
+  "análisis completo" → full_analysis
+  Pregunta puntual → punctual
+  Dato específico → data_point
+  "status" → system_health
+- Activar Attention Mechanism: detectar tema dominante del mercado
+- Decidir plan de ejecución: qué agentes activar, con qué profundidad
+- Control de costo (tokens consumidos, calls a APIs)
+- Control de latencia (timeout por agente)
+- Rejection Gate: descartar inputs irrelevantes con explicación causal
+- Determinar Operating Mode según disponibilidad de datos
+
+ATTENTION MECHANISM:
+Detecta el tema dominante del mercado en este momento.
+Inputs: volumen de noticias por tema, magnitud de reacciones de precio,
+cambio en correlaciones habituales.
+Output:
+  dominant_theme: "fed_policy" | "geopolitical_crisis" | "risk_event" | "data_driven" | "technical"
+  attention_weights: {"fed": 0.6, "geopolitics": 0.3, "data": 0.1}
+  Estos weights se propagan a todos los agentes downstream.
+
+OPERATING MODES:
+  FULL: todos activos, todas las fuentes, SCM completo
+  DEGRADED: fuentes parciales, SCM parcial, output marcado + confidence penalizado
+  MINIMAL: solo precio y liquidez, sin macro ni causalidad, disclaimer
+  OFFLINE: solo contexto histórico, Kill Switch activo para claims sobre "ahora"
+
+================================================================================
+2. PERCEPTION LAYER (ingesta y normalización)
+================================================================================
+
+PERCEPTION AGENTS (paralelo):
+
+Price Agent:
+- Precios en tiempo real: DXY, EURUSD, GBPUSD
+- Fuentes en cascada (prioridad configurable)
+- Datos OHLCV históricos para análisis de estructura
+
+News Agent:
+- RSS feeds múltiples con fallback
+- Noticias macro y geopolítica
+- Filtro de relevancia: solo eventos con impacto potencial en USD/EUR/GBP
+- Deduplicación por similitud
+
+Macro Agent:
+- Datos económicos: CPI, NFP, unemployment, GDP, PCE
+- Calendario económico con pre-carga
+- Decisiones y comunicados de bancos centrales (Fed, ECB, BoE)
+- Yields (US 10Y, 2Y, Bund, Gilt) + spreads
+- Probabilidades de tasas (FedWatch o equivalente)
+- Correlaciones: oro, VIX, S&P 500, petróleo
+
+[Futuro] Alternative Data Agent:
+- Sentiment de redes sociales
+- COT Reports (posicionamiento)
+- Datos alternativos (fase 4+, no prioritario)
+
+PROCESOS DE CADA PERCEPTION AGENT:
+- Normalización multi-modal
+- Timestamp obligatorio en todo dato
+- Verificación automática de fuente
+- Cross-check cuando hay múltiples fuentes del mismo dato
+
+OUTPUT:
+Datos limpios, sincronizados y etiquetados por agente, listos para validación.
+
+================================================================================
+3. DATA INTEGRITY AGENT (gate entre Perception e Interpretation)
+================================================================================
+
+FUNCIONES:
+- Evaluar frescura de cada dato (timestamp vs ahora)
+- Evaluar confiabilidad de la fuente (API directa vs scraping de tercer nivel)
+- Detectar datos anómalos (precio que salta 500 pips en 1 segundo = error de feed)
+- Asignar QUALITY SCORE a cada dato: 0.0 a 1.0
+- Detectar divergencia entre fuentes del mismo dato
+- Kill Switch:
+  Si quality_score promedio < umbral configurable → bloquea output
+  Si dato tiene > 4 horas de antigüedad → marca explícitamente
+  Si ninguna fuente responde → Kill Switch total
+
+OUTPUT:
+Datos validados con quality_score adjunto. Los agentes downstream usan
+el quality_score para ponderar la importancia de cada dato.
+
+DIFERENCIA CON KILL SWITCH BINARIO:
+Kill Switch = "hay dato o no hay". Data Integrity = "hay dato, pero ¿qué
+tan confiable es? Úsalo con peso proporcional a su calidad".
+
+================================================================================
+4. INTERPRETATION LAYER (señales)
+================================================================================
+
+INTERPRETATION AGENTS (paralelo):
+
+Liquidity Agent:
+- Medir volatilidad por ventana horaria
+- Volumen relativo vs promedio histórico
+- Detectar picos de movimiento y consistencia temporal
+- Clasificar: Alta / Media / Baja / Transición
+- Identificar ventanas óptimas de operación
+
+Price Behavior Agent:
+- Detectar fase: expansión / compresión / transición
+- Identificar rupturas de rango y su resolución
+- Estructura por sesión (¿Londres rompe lo que Asia construye?)
+- Clasificar: tendencia / rango / compresión / breakout
+
+Macro Pressure Agent:
+- Determinar presión macro dominante: hawkish / dovish / neutral
+- Evaluar coherencia entre política monetaria y datos
+- Medir impacto de diferenciales de tasas en pares
+
+Regime Detection Agent:
+- Detectar cambios de régimen en tiempo real
+- Identificar transiciones: risk-on ↔ risk-off, trending ↔ ranging
+- Alertar cuando las correlaciones habituales se rompen
+  (ej: oro y dólar subiendo juntos = señal de cambio de régimen)
+
+OUTPUT:
+Señales interpretadas, NO conclusiones finales. Cada señal incluye
+el quality_score heredado de los datos que la generaron.
+
+================================================================================
+5. CAUSAL ENGINE (núcleo)
+================================================================================
+
+FUNCIONES:
+- Construcción de Structural Causal Models (SCM) dinámicos
+- Eliminación automática de correlaciones espurias
+- Counterfactual Reasoning
+- Causal Discovery (actualización en tiempo real con Invariant Causal Prediction)
+- Consulta de lecciones previas en Episodic Memory antes de construir grafo
+
+EJEMPLO DE SCM:
+Inflación ↑ → Fed hawkish → yields ↑ → USD ↑ → EURUSD ↓
++ contrafactual: "si yields no rompen 4.2%, la cadena se debilita en un 40%"
+
+CONSULTA DE LECCIONES:
+Antes de construir un grafo, el Causal Engine busca en Episodic Memory:
+"¿Hubo un evento similar? ¿El modelo fue correcto? ¿Qué falló?"
+Si hay una lección relevante, ajusta pesos del grafo antes de emitir.
+
+OUTPUT:
+- Grafo causal activo (con pesos de intervención)
+- Variables dominantes
+- Lista de contrafactuales relevantes
+- Confidence parcial del grafo (vía Confidence Service)
+
+================================================================================
+6. CONTEXT ENGINE (gestión inteligente)
+================================================================================
+
+FUNCIONES:
+- Selección automática del contexto más relevante para esta consulta
+- Ponderación por: tiempo + impacto + relevancia causal + attention weights
+- Eliminación de redundancia y eco
+- Recuperación híbrida (vector + graph database) de grafos causales históricos
+- Compresión semántica de contexto antiguo
+
+RAG MULTI-CAPA:
+- Nivel 1: tiempo real (precios, calendario, noticias de hoy)
+- Nivel 2: memoria interna (sesión actual, análisis recientes)
+- Nivel 3: conocimiento estructurado (reglas macro, patrones, lecciones)
+- Ranking por: relevancia × frescura × peso causal
+
+OUTPUT:
+Contexto optimizado y comprimido, listo para Synthesis.
+
+================================================================================
+7. CONFIDENCE SERVICE (transversal)
+================================================================================
+
+NO es una capa secuencial. Es un servicio que cualquier agente puede invocar
+en cualquier punto del flujo.
+
+DIMENSIONES:
+- Calidad de datos (quality_scores del Data Integrity Agent)
+- Alineación entre agentes (¿coinciden las señales?)
+- Frescura temporal (¿qué tan recientes son los datos?)
+- Nivel de ruido del mercado (volatilidad extrema = menor confianza)
+- Consistencia causal (¿el grafo SCM es robusto?)
+- Robustez cross-regime (¿funciona en distintos regímenes de mercado?)
+
+CÁLCULO:
+Cada dimensión produce un score 0.0-1.0.
+El score global es el promedio ponderado (los pesos dependen del Operating Mode).
+
+QUIÉN LO USA:
+- Perception Agents: confidence por dato de entrada
+- Interpretation Agents: confidence por señal
+- Causal Engine: confidence por cadena causal
+- Synthesis Agent: confidence global del output
+
+OUTPUT:
+- Score global (%)
+- Desglose detallado por dimensión
+- Flag si alguna dimensión está por debajo de umbral crítico
+
+================================================================================
+8. GOVERNOR AGENT (validación pre-output)
+================================================================================
+
+FUNCIONES:
+- Revisar coherencia entre todos los agentes antes de que el output salga
+- Detectar contradicciones (macro alcista pero correlaciones bajistas)
+- Verificar que toda conclusión tenga cadena causal auditable
+- Verificar que el confidence score no esté inflado artificialmente
+- Puede VETAR un output si no pasa validación
+- Si vetado → devuelve al Orchestrator con explicación de qué falló
+
+DIFERENCIA CON ORCHESTRATOR:
+Orchestrator decide el PLAN (antes de procesar).
+Governor valida el RESULTADO (después de procesar, antes de entregar).
+
+CONTRADICCIONES:
+Cuando detecta contradicción entre agentes, NO la resuelve arbitrariamente.
+La expone al Synthesis Agent para que la incluya en el output.
+El trader decide qué hacer con la contradicción.
+
+================================================================================
+9. SIMULATION ENGINE (escenarios)
+================================================================================
+
+FUNCIONES:
+- Generar escenarios alcista / bajista / neutral
+- Definir condiciones de activación precisas (macro + técnicas)
+- Definir KILL CONDITIONS: qué invalida cada escenario
+- Agent-Based Simulation
+- Counterfactual simulations completas
+
+CADA ESCENARIO INCLUYE:
+- Condiciones macro de activación
+- Zonas técnicas de referencia (rangos, no niveles exactos)
+- Ventana temporal estimada (¿horas o días?)
+- Liquidez esperada (¿se puede operar en este escenario?)
+- Kill conditions: "este escenario se invalida si..."
+- Probabilidad condicional (no absoluta)
+
+EJEMPLO:
+Escenario alcista DXY:
+  Activación: CPI > 0.3% MoM + yields 10Y > 4.2% + FedWatch >70% hold
+  Zona de interés: DXY 100.50-101.00
+  Ventana: 24-48h post dato
+  Liquidez: alta en solapamiento Londres-NY
+  Kill condition: yields caen debajo de 4.0% o risk-off extremo (VIX > 30)
+  Probabilidad condicional: 65% SI se cumplen todas las condiciones
+
+================================================================================
+10. SYNTHESIS AGENT (output final — único vocero)
+================================================================================
+
+Es el ÚNICO agente que habla con el usuario. Los demás son internos.
+
+INCLUYE OBLIGATORIAMENTE:
+- Contexto relevante (filtrado por Context Engine)
+- Cadena causal principal (del Causal Engine)
+- Variables dominantes
+- Confidence Score global + desglose
+- Escenarios con probabilidades condicionales (del Simulation Engine)
+- Contradicciones detectadas (del Governor Agent)
+- Recomendaciones de monitoreo (NUNCA trading advice)
+- Operating Mode actual (full/degraded/minimal)
+
+FORMATO SEGÚN INTENCIÓN:
+- full_analysis → 1.000-1.400 palabras, todas las secciones
+- punctual → 50-200 palabras, solo lo relevante
+- data_point → 1-3 oraciones
+- system_health → reporte de estado
+
+REGLAS INAMOVIBLES:
+- Sin predicción directa
+- Sin relleno ni lenguaje ambiguo
+- Claridad máxima
+- Cada output completamente auditable
+- Si algo falta o falló → decirlo explícitamente
+
+================================================================================
+11. MEMORY SYSTEM (multicapa)
+================================================================================
+
+CAPAS:
+- Corto plazo: sesión actual, sin comprimir, LRU eviction
+- Medio plazo: 14 días, compresión semántica, relevance decay
+- Largo plazo: 6 meses, agregación estadística, time decay + low access
+
+EPISODIC MEMORY:
+Almacena eventos completos junto con su cadena causal íntegra:
+  evento → reacción del precio → impacto → variables dominantes
+  → contrafactuales → lección aprendida → grafo causal completo
+
+Permite recuperación rápida por SIMILITUD CAUSAL (no solo semántica).
+Si hoy hay un CPI hawkish, busca: "¿qué pasó las últimas 5 veces que
+hubo CPI hawkish con yields en este rango?"
+
+MECANISMOS:
+- Semantic Causal Graph DB: base híbrida (vector + grafo)
+- Time decay basado en utilidad causal (no solo tiempo)
+- Compresión automática de eventos repetitivos
+- Recuperación selectiva ultra-rápida
+
+================================================================================
+12. LEARNING LOOP (adaptación)
+================================================================================
+
+TRIGGER: 24-48h después de cada análisis con sesgo declarado
+TRIGGER MANUAL: el usuario pide "review ayer"
+TRIGGER SEMANAL: resumen de accuracy
+
+PROCESO:
+1. Reflection Agent compara sesgo declarado vs movimiento real
+2. Calcula accuracy: ¿correcto en dirección? ¿En magnitud?
+3. Si incorrecto → analiza por qué:
+   a) ¿Dato que no estaba en el radar?
+   b) ¿Cadena causal rota? ¿En qué eslabón?
+   c) ¿Evento imprevisto?
+   d) ¿Manipulación / baja liquidez?
+4. Genera Lesson Learned estructurada:
+   bias_declared → actual_outcome → accuracy → failure_point → lesson → adjustment
+5. Almacena en Episodic Memory con grafo causal completo
+6. Causal Engine consulta lecciones antes de construir grafos futuros
+
+OUTPUT:
+Mejora progresiva + "Lessons Learned" acumuladas.
+
+================================================================================
+PRINCIPIO FINAL
+================================================================================
+
+"El sistema no procesa más información.
+Procesa la información correcta, en el momento correcto, con el peso correcto
+y con agentes que colaboran bajo supervisión causal."

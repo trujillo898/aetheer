@@ -1,0 +1,117 @@
+AETHEER — VISIÓN DEL PROYECTO
+
+================================================================================
+QUÉ ES
+================================================================================
+
+Aetheer es un sistema de inteligencia de mercado para trading de Forex. No es un bot, no es un indicador, no es un prompt. Es un copiloto cognitivo que procesa capas de información que un trader humano no puede sostener simultáneamente y las transforma en contexto accionable.
+
+El nombre viene de Aether — el quinto elemento clásico, la sustancia invisible que conecta todo lo visible. La doble "e" representa la dualidad entre ejecución y entendimiento.
+
+Aetheer no está atado a ninguna tecnología específica. La implementación cambia. La idea persiste.
+
+================================================================================
+QUÉ PROBLEMA RESUELVE
+================================================================================
+
+Un trader institucional opera con terminales Bloomberg, equipos de analistas, feeds en tiempo real y modelos cuantitativos. Un trader independiente opera con un gráfico, su criterio y las noticias que alcanza a leer.
+
+Aetheer cierra esa asimetría informacional.
+
+El trader que usa Aetheer tiene acceso a:
+- Contexto macroeconómico estructurado (política monetaria, inflación, empleo)
+- Análisis de liquidez intradía por sesión y ventana horaria
+- Evaluación de impacto de eventos económicos con cadenas causales
+- Correlaciones cruzadas verificadas (DXY, oro, yields, VIX, equities)
+- Detección de movimientos potencialmente manipulados
+- Escenarios con condiciones de activación y de invalidación
+- Confidence score desglosado por dimensión
+- Memoria que aprende de cada evento y cada error
+- Razonamiento causal formal, no correlación superficial
+
+================================================================================
+QUÉ NO ES
+================================================================================
+
+- NO ejecuta operaciones
+- NO genera señales de compra o venta
+- NO predice el futuro del mercado
+- NO reemplaza el análisis técnico del trader
+- NO está atado a una implementación específica
+
+Aetheer contextualiza, evalúa causalidad y prioriza información. El trader decide.
+
+================================================================================
+COBERTURA
+================================================================================
+
+Instrumento primario: US Dollar Index (DXY)
+Pares operativos: EURUSD, GBPUSD
+Horizonte temporal: Intradía y swing (hasta 1 mes)
+Dominio: Análisis macroeconómico, fundamental, de liquidez y comportamiento de precio
+
+================================================================================
+LAS TRES PREGUNTAS
+================================================================================
+
+1. CUÁNDO se mueve el mercado (timing)
+   → Liquidez, ventanas óptimas, sesiones
+
+2. CUÁNTO se mueve (intensidad)
+   → Estructura de precio, expansión, compresión, rupturas
+
+3. POR QUÉ se mueve (causalidad)
+   → Política monetaria, eventos, geopolítica, correlaciones
+   → Modelado causal formal, no correlación
+
+================================================================================
+FILOSOFÍA
+================================================================================
+
+- Contexto > predicción
+- Causalidad > correlación
+- Decidir qué procesar antes de procesar
+- Cada token debe justificar su existencia
+- El sistema no piensa más, piensa mejor
+- Todo output debe ser completamente auditable
+
+================================================================================
+PERSONALIDAD
+================================================================================
+
+Analista institucional senior. Conciso, directo, jerga de mercado cuando es precisa.
+Si no sabe → lo dice. Si los datos son viejos → lo marca. Si hay contradicción → la expone.
+
+Longitud:
+- Análisis completo: 1.000-1.400 palabras
+- Pregunta puntual: 50-200 palabras
+- Dato específico: 1-3 oraciones
+
+================================================================================
+PRINCIPIOS DE SEGURIDAD
+================================================================================
+
+1. Kill Switch: sin datos confiables → no hay output
+2. Verificación temporal: timestamps computados, nunca inferidos
+3. Transparencia de fuentes: todo dato con origen y hora
+4. Anti-predicción: contexto, no predicción
+5. Contradicción explícita: si los agentes no coinciden, se muestra
+6. Confidence desglosado: el usuario sabe qué tan confiable es cada parte
+7. Auditabilidad: toda conclusión expone su cadena lógica completa
+
+================================================================================
+VISIÓN A LARGO PLAZO
+================================================================================
+
+Fase 1 (actual): MVP funcional — agentes básicos, fuentes de datos, memoria simple
+Fase 2: Causal Engine formal, feeds en tiempo real, COT Report, sentiment
+Fase 3: Time-Series Engine especializado, backtesting, escenarios probabilísticos
+Fase 4: Multi-model, datos alternativos, infraestructura propia
+
+================================================================================
+PRINCIPIO FINAL
+================================================================================
+
+"El sistema no procesa más información.
+Procesa la información correcta, en el momento correcto, con el peso correcto
+y con agentes que colaboran bajo supervisión causal."
