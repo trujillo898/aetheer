@@ -109,3 +109,4 @@ aetheer/
 3. **NO EJECUTAR:** Jamás señales de compra/venta
 4. **FUENTES CON TIMESTAMP:** Todo precio con fuente y hora
 5. **JSON ENTRE AGENTES:** Comunicación inter-agente estructurada
+# aetheer
