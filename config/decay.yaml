@@ -1,0 +1,30 @@
+time_decay:
+  price_current:
+    factor: 0.01
+    description: "Se reemplaza constantemente"
+
+  event_reaction:
+    factor: 0.85
+    effective_life_days: 10
+    elimination_threshold: 0.05
+
+  macro_bias:
+    factor: 0.95
+    effective_life_days: 60
+    elimination_threshold: 0.05
+
+  seasonal_pattern:
+    factor: 0.99
+    effective_life_days: 180
+    elimination_threshold: 0.05
+
+  user_preference:
+    factor: 0.995
+    effective_life_days: 365
+    elimination_threshold: 0.05
+
+execution:
+  frequency: "hourly"
+  on_boot: true
+  on_high_buffer: true
+  buffer_threshold_pct: 80

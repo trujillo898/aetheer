@@ -1,0 +1,218 @@
+// ============================================================================
+// AETHEER INDICATOR v1.0
+// Indicador consolidado para sistema Aetheer de inteligencia de mercado.
+// Expone datos vía tabla Pine para lectura automatizada.
+// NO usar como indicador visual de trading — es un data feed para Aetheer.
+// ============================================================================
+
+//@version=5
+indicator("Aetheer", overlay=true, max_labels_count=1, max_lines_count=0)
+
+// ============================================================================
+// CÁLCULOS — VOLATILIDAD / LIQUIDEZ
+// ============================================================================
+atr14       = ta.atr(14)
+atr14_sma   = ta.sma(atr14, 20)
+atr_expand  = atr14 > atr14_sma
+
+vol_sma     = ta.sma(volume, 20)
+vol_rel     = vol_sma > 0 ? volume / vol_sma : 0.0
+
+// ============================================================================
+// CÁLCULOS — ESTRUCTURA DE PRECIO
+// ============================================================================
+ema20  = ta.ema(close, 20)
+ema50  = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+
+price_vs_20  = close > ema20  ? "above" : "below"
+price_vs_50  = close > ema50  ? "above" : "below"
+price_vs_200 = close > ema200 ? "above" : "below"
+
+ema_align = ema20 > ema50 and ema50 > ema200 ? "bullish" :
+            ema20 < ema50 and ema50 < ema200 ? "bearish" : "mixed"
+
+rsi14 = ta.rsi(close, 14)
+
+// Divergencia RSI simplificada (5 barras lookback)
+price_ll = low < ta.lowest(low, 5)[1]
+rsi_hl   = rsi14 > ta.valuewhen(low == ta.lowest(low, 5), rsi14, 1)
+bull_div = price_ll and rsi_hl
+
+price_hh = high > ta.highest(high, 5)[1]
+rsi_lh   = rsi14 < ta.valuewhen(high == ta.highest(high, 5), rsi14, 1)
+bear_div = price_hh and rsi_lh
+
+rsi_div = bull_div ? "bull_div" : bear_div ? "bear_div" : "none"
+
+// Fase del precio (Bollinger Width)
+bb_upper = ta.sma(close, 20) + 2 * ta.stdev(close, 20)
+bb_lower = ta.sma(close, 20) - 2 * ta.stdev(close, 20)
+bb_width = (bb_upper - bb_lower) / ta.sma(close, 20)
+bb_width_sma = ta.sma(bb_width, 20)
+
+price_phase = bb_width < bb_width_sma * 0.8 ? "compression" :
+              bb_width > bb_width_sma * 1.2 ? "expansion" : "transition"
+
+// ============================================================================
+// CÁLCULOS — SESIÓN
+// ============================================================================
+hour_utc   = hour(time, "UTC")
+minute_utc = minute(time, "UTC")
+time_utc   = hour_utc * 100 + minute_utc
+
+is_asia       = time_utc >= 0    and time_utc < 800
+is_london     = time_utc >= 800  and time_utc < 1300
+is_overlap    = time_utc >= 1300 and time_utc < 1630
+is_ny         = time_utc >= 1630 and time_utc < 2100
+
+current_session = is_asia    ? "asia" :
+                  is_london  ? "london" :
+                  is_overlap ? "lon_ny_overlap" :
+                  is_ny      ? "new_york" : "off_hours"
+
+var float sess_high = na
+var float sess_low  = na
+var float prev_sess_high = na
+var float prev_sess_low  = na
+
+session_changed = (is_asia and not is_asia[1]) or
+                  (is_london and not is_london[1]) or
+                  (is_overlap and not is_overlap[1] and not is_london[1]) or
+                  (is_ny and not is_ny[1] and not is_overlap[1])
+
+if session_changed
+    prev_sess_high := sess_high
+    prev_sess_low  := sess_low
+    sess_high      := high
+    sess_low       := low
+else
+    sess_high := math.max(nz(sess_high, high), high)
+    sess_low  := math.min(nz(sess_low, low), low)
+
+sess_break = not na(prev_sess_high) and high > prev_sess_high ? "broke_high" :
+             not na(prev_sess_low) and low < prev_sess_low    ? "broke_low" : "inside"
+
+// ============================================================================
+// CÁLCULOS — NIVELES CLAVE
+// ============================================================================
+prev_day_high  = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_on)
+prev_day_low   = request.security(syminfo.tickerid, "D", low[1],  lookahead=barmerge.lookahead_on)
+day_open       = request.security(syminfo.tickerid, "D", open,    lookahead=barmerge.lookahead_on)
+prev_week_high = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_on)
+prev_week_low  = request.security(syminfo.tickerid, "W", low[1],  lookahead=barmerge.lookahead_on)
+
+session_range = nz(sess_high, high) - nz(sess_low, low)
+
+// ============================================================================
+// OUTPUT — TABLA PARA AETHEER
+// ============================================================================
+var table t = table.new(position.bottom_right, 2, 30,
+                        bgcolor=color.new(color.black, 100),
+                        border_color=color.new(color.black, 100),
+                        border_width=0)
+
+if barstate.islast
+    row = 0
+
+    // Volatilidad / Liquidez
+    table.cell(t, 0, row, "ATR14",           text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(atr14, "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "ATR14_SMA",       text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(atr14_sma, "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "ATR_EXPANDING",   text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(atr_expand), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "SESSION_RANGE",   text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(session_range, "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "VOL_REL",         text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(vol_rel, "#.##"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+
+    // Estructura de precio
+    table.cell(t, 0, row, "EMA20",           text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(ema20, "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "EMA50",           text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(ema50, "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "EMA200",          text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(ema200, "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "PRICE_VS_EMA20",  text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, price_vs_20,        text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "PRICE_VS_EMA50",  text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, price_vs_50,        text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "PRICE_VS_EMA200", text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, price_vs_200,       text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "EMA_ALIGN",       text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, ema_align,          text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "RSI14",           text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(rsi14, "#.##"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "RSI_DIV",         text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, rsi_div,            text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "PRICE_PHASE",     text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, price_phase,        text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+
+    // Sesión
+    table.cell(t, 0, row, "SESSION",          text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, current_session,    text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "SESSION_HIGH",     text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(nz(sess_high, high), "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "SESSION_LOW",      text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(nz(sess_low, low), "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "PREV_SESSION_HIGH",text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(nz(prev_sess_high, 0), "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "PREV_SESSION_LOW", text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(nz(prev_sess_low, 0), "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "SESSION_BREAK",    text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, sess_break,          text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+
+    // Niveles clave
+    table.cell(t, 0, row, "PREV_DAY_HIGH",   text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(prev_day_high, "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "PREV_DAY_LOW",    text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(prev_day_low, "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "DAY_OPEN",        text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(day_open, "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "PREV_WEEK_HIGH",  text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(prev_week_high, "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "PREV_WEEK_LOW",   text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(prev_week_low, "#.#####"), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+
+    // Meta
+    table.cell(t, 0, row, "SYMBOL",          text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, syminfo.ticker,     text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "TF",              text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, timeframe.period,   text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "CALC_TIME",       text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(timenow), text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "BAR_TIME",        text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, str.tostring(time),   text_color=color.new(color.white, 100), text_size=size.tiny)
+    row += 1
+    table.cell(t, 0, row, "VERSION",         text_color=color.new(color.white, 100), text_size=size.tiny)
+    table.cell(t, 1, row, "1.0",             text_color=color.new(color.white, 100), text_size=size.tiny)

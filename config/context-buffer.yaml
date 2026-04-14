@@ -1,0 +1,37 @@
+buffer:
+  short_term:
+    max_tokens: 2048
+    retention: "current_session"
+    compression: "none"
+    eviction: "lru"
+
+  medium_term:
+    max_tokens: 4096
+    retention_days: 14
+    compression: "semantic_summary"
+    eviction: "relevance_decay"
+
+  long_term:
+    max_tokens: 8192
+    retention_days: 180
+    compression: "statistical_aggregate"
+    eviction: "time_decay_and_low_access"
+
+  global:
+    total_active_budget: 6144
+    overflow_policy: "compress_oldest_first"
+    underflow_threshold_pct: 30
+
+anti_patterns:
+  overloading:
+    trigger: "utilization > 90% AND fragmentation > 0.5"
+    action: "aggressive_prune"
+  underflow:
+    trigger: "utilization < 30%"
+    action: "recover_from_medium_long"
+  redundancy:
+    trigger: "duplicate_semantic_entries"
+    action: "unify_canonical"
+  echo:
+    trigger: "overlap_with_recent_outputs"
+    action: "omit_already_delivered"

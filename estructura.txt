@@ -1,0 +1,99 @@
+AETHEER — Estructura del Proyecto
+Generado: 2026-04-11
+(Excluye: .venv/, __pycache__/, *.pyc, *.db)
+================================================================
+
+aetheer/
+│
+├── CLAUDE.md                          # Instrucciones del sistema (arquitectura, reglas, stack)
+├── README.md                          # Documentación general del proyecto
+├── requirements.txt                   # Dependencias Python del proyecto raíz
+├── .mcp.json                          # Configuración de MCP servers
+├── .env                               # Variables de entorno (API keys, etc.) — NO commitear
+├── .env.example                       # Plantilla de variables de entorno
+├── .gitignore                         # Archivos ignorados por git
+│
+├── .claude/
+│   ├── settings.local.json            # Configuración local de Claude Code
+│   └── agents/                        # Definiciones de subagentes especializados
+│       ├── context-orchestrator.md    # Agente: gestión y distribución de contexto
+│       ├── events.md                  # Agente: calendario económico e impacto de noticias
+│       ├── liquidity.md               # Agente: volatilidad, volumen y sesiones intradía
+│       ├── macro.md                   # Agente: política monetaria, tasas, correlaciones
+│       ├── price-behavior.md          # Agente: patrones estructurales de precio
+│       └── synthesis.md               # Agente: integrador principal, genera respuesta final
+│
+├── config/
+│   ├── context-buffer.yaml            # Config del buffer de contexto inter-agentes
+│   ├── decay.yaml                     # Config de time decay para memoria
+│   └── sources.yaml                   # Fuentes de datos y prioridades (TV, OANDA, AV)
+│
+├── db/
+│   └── aetheer.db                     # Base de datos SQLite (excluida de este listado)
+│                                      # Tablas: price_snapshots, events, session_stats,
+│                                      #         context_memory, user_profile,
+│                                      #         agent_outputs, heartbeat_log
+│
+├── logs/
+│   ├── .gitkeep                       # Mantiene el directorio en git
+│   └── kill-switch-test.log           # Log del test del kill switch
+│
+├── mcp-servers/
+│   │
+│   ├── shared/                        # Utilidades compartidas entre MCP servers
+│   │   ├── __init__.py
+│   │   ├── cache.py                   # Cache en memoria (TTL configurable)
+│   │   └── tv_availability.py         # Detección de disponibilidad de TradingView
+│   │
+│   ├── price-feed/                    # MCP Server: precios en tiempo real
+│   │   ├── server.py                  # Entry point del servidor MCP
+│   │   ├── sources.py                 # Cascada de fuentes (TV → OANDA → Alpha Vantage)
+│   │   ├── oanda_client.py            # Cliente OANDA v20 API (EURUSD, GBPUSD)
+│   │   ├── alpha_vantage.py           # Cliente Alpha Vantage API (fallback)
+│   │   └── requirements.txt
+│   │
+│   ├── economic-calendar/             # MCP Server: calendario económico
+│   │   ├── server.py                  # Entry point del servidor MCP
+│   │   ├── scraper.py                 # Scraper de eventos económicos
+│   │   └── requirements.txt
+│   │
+│   ├── macro-data/                    # MCP Server: datos macro (FRED, yields, FedWatch)
+│   │   ├── server.py                  # Entry point del servidor MCP
+│   │   ├── fred_client.py             # Cliente FRED API (tasas, inflación, etc.)
+│   │   └── requirements.txt
+│   │
+│   ├── news-feed/                     # MCP Server: noticias macro vía RSS
+│   │   ├── server.py                  # Entry point del servidor MCP
+│   │   ├── feed_parser.py             # Parser de feeds RSS/Atom
+│   │   └── requirements.txt
+│   │
+│   └── memory/                        # MCP Server: memoria persistente
+│       ├── server.py                  # Entry point del servidor MCP
+│       ├── compression.py             # Compresión y time decay de contexto
+│       ├── schema.sql                 # Esquema SQLite para memoria
+│       └── requirements.txt
+│
+└── scripts/
+    ├── bootstrap.sh                   # Setup inicial del entorno
+    ├── install-deps.sh                # Instalación de dependencias
+    ├── heartbeat.sh                   # Health check del sistema
+    ├── preload-calendar.py            # Precarga del calendario económico en DB
+    └── test-kill-switch.py            # Test del kill switch (sin precio DXY)
+
+
+================================================================
+NOTAS DE ARQUITECTURA
+
+Flujo de consulta:
+  Usuario → context-orchestrator → [liquidity, events, price-behavior, macro] → synthesis → Usuario
+
+Prioridad de precios:
+  1. TradingView MCP (cuando TV Desktop está abierto con --remote-debugging-port=9222)
+  2. OANDA v20 API (EURUSD, GBPUSD)
+  3. Alpha Vantage (fallback general)
+  DXY: solo disponible via TV (TVC:DXY) o scraping
+
+Cobertura de instrumentos:
+  - DXY (US Dollar Index)
+  - EURUSD
+  - GBPUSD
