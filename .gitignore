@@ -4,4 +4,3 @@ logs/*.log
 __pycache__/
 *.pyc
 .venv/
-06_DECISIONES.txt

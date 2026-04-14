@@ -1,0 +1,164 @@
+AETHEER — REGISTRO DE DECISIONES TÉCNICAS
+
+================================================================================
+FORMATO
+================================================================================
+
+DECISIÓN: [título]
+FECHA: [fecha]
+CONTEXTO: [por qué surgió]
+OPCIONES:
+  A) [opción] — pros / contras
+  B) [opción] — pros / contras
+DECIDIDO: [cuál y por qué]
+IMPACTO: [qué cambia]
+IMPLEMENTACIÓN ACTUAL: [cómo se hizo hoy]
+IMPLEMENTACIÓN IDEAL: [cómo se haría con la arquitectura objetivo]
+ESTADO: implementado / pendiente / descartado
+
+================================================================================
+ABRIL 2026
+================================================================================
+
+--- D001 ---
+DECISIÓN: Implementación inicial con Claude Code
+FECHA: abril 2026
+CONTEXTO: necesitaba un MVP funcional rápido para validar la arquitectura
+OPCIONES:
+  A) Claude Code + subagentes + MCP servers — rápido, sin infra propia
+  B) Framework custom Python (LangGraph, CrewAI) — más control, más setup
+  C) Infraestructura propia desde cero — máximo control, meses de desarrollo
+DECIDIDO: A — permite prototipar la arquitectura multi-agente en días
+IMPACTO: toda la Fase 1 corre sobre Claude Code
+IMPLEMENTACIÓN ACTUAL: 6 subagentes .md + 5 MCP servers Python + SQLite
+IMPLEMENTACIÓN IDEAL: orquestador custom con multi-model y SCM formal
+ESTADO: implementado
+
+--- D002 ---
+DECISIÓN: OANDA como fuente primaria de precio
+FECHA: abril 2026
+CONTEXTO: precios scrapeados no coincidían con gráficos de TradingView
+OPCIONES:
+  A) OANDA v20 API — mismo feed que TradingView, bid/ask real
+  B) Alpha Vantage — gratis, mid-market, rate limited (25/día)
+  C) Solo scraping — frágil, lento, propenso a bloqueos
+DECIDIDO: A como primaria, B como respaldo, C como fallback
+IMPACTO: consistencia total entre análisis y gráficos del trader
+IMPLEMENTACIÓN ACTUAL: oanda_client.py con cascada de 6 niveles
+IMPLEMENTACIÓN IDEAL: WebSocket de OANDA para streaming continuo
+ESTADO: SUPERSEDIDA por D006 + D007 (OANDA eliminada del proyecto, TV MCP es fuente primaria)
+
+--- D003 ---
+DECISIÓN: Cache TTL en MCP servers
+FECHA: abril 2026
+CONTEXTO: scraping repetitivo genera bloqueos de IP y latencia
+OPCIONES:
+  A) Cache en memoria con TTL por tipo — simple, pierde en reinicio
+  B) Cache en Redis — persistente, más complejo
+  C) Sin cache — cada consulta va a fuente directa
+DECIDIDO: A — apropiado para MVP, se puede migrar a B después
+IMPACTO: reduce calls externos ~90%, latencia de consultas consecutivas ~0
+IMPLEMENTACIÓN ACTUAL: shared/cache.py con TTL configurable
+IMPLEMENTACIÓN IDEAL: cache distribuido si hay múltiples instancias
+ESTADO: implementado
+
+--- D004 ---
+DECISIÓN: Fix de alucinación temporal
+FECHA: abril 2026
+CONTEXTO: sistema dijo "mañana martes 8 de abril" cuando era miércoles
+OPCIONES:
+  A) Script Python que computa fecha/hora, prohibir cálculo mental
+  B) Agregar fecha al system prompt y esperar que el LLM lo use
+  C) No hacer nada y confiar en el LLM
+DECIDIDO: A — los LLMs no son confiables para cálculos de calendario
+IMPACTO: todo agente que hace referencia temporal debe usar el script
+IMPLEMENTACIÓN ACTUAL: scripts/now.py + tool get_current_time
+IMPLEMENTACIÓN IDEAL: igual, esto no depende de la tecnología
+ESTADO: implementado
+
+--- D005 ---
+DECISIÓN: Arquitectura cognitiva de referencia
+FECHA: abril 2026
+CONTEXTO: definir la visión completa del sistema independiente de implementación
+DECIDIDO: arquitectura de 12 capas con Causal Engine, Governor Agent,
+  Data Integrity Agent, Confidence Service transversal, Episodic Memory,
+  Learning Loop y Operating Modes formales
+IMPACTO: define el roadmap completo del proyecto
+IMPLEMENTACIÓN ACTUAL: solo ~30% implementado en Claude Code (Fase 1)
+IMPLEMENTACIÓN IDEAL: el documento 02_ARQUITECTURA_COGNITIVA.txt
+ESTADO: documento definido, implementación progresiva
+
+--- D006 ---
+DECISIÓN: TradingView MCP como fuente primaria de datos de mercado
+FECHA: abril 2026
+CONTEXTO: sin acceso a OANDA API ni a ningún feed institucional de precio.
+  Fuentes actuales: Alpha Vantage (25 calls/día, delay), scraping (frágil).
+  tradingview-mcp (github.com/tradesdontlie/tradingview-mcp) conecta Claude Code
+  con TradingView Desktop vía Chrome DevTools Protocol. 78 tools.
+  TV es la única fuente de precio en tiempo real con calidad de gráfico.
+  Entorno: Ubuntu Server 24.04 con Hyprland (Wayland), TV Desktop instalado.
+  El sistema puede auto-lanzar y auto-reiniciar TV por comando.
+OPCIONES:
+  A) TV MCP como fuente primaria + sistema anti-fragilidad de 5 capas
+     — pros: dato idéntico al gráfico, yields/VIX/oro/DXY directo, indicadores técnicos,
+       auto-launch elimina dependencia operacional del usuario
+     — contras: interfaz no documentada, depende de TV Desktop funcional
+  B) No integrar, seguir con Alpha Vantage + scraping
+     — pros: sin dependencia nueva
+     — contras: 25 calls/día, sin DXY directo, sin indicadores, sin yields real-time
+DECIDIDO: A — sin OANDA, TV es la única fuente viable de precio real-time.
+  La fragilidad se mitiga con sistema de 5 capas: heartbeat, cache/snapshot,
+  reconexión auto, degradación explícita, auto-launch/restart.
+  Cascada: TV MCP → cache/snapshot → Alpha Vantage → scraping.
+IMPACTO:
+  - TV MCP es fuente primaria de precio, DXY, yields, correlaciones, indicadores
+  - Sistema anti-fragilidad de 5 capas:
+    1. Heartbeat cada 60s vía tv_health_check
+    2. Snapshot en SQLite en cada lectura exitosa (precio, yields, correlaciones)
+    3. Reconexión automática con backoff si TV no responde
+    4. Degradación a Operating Mode DEGRADED (no fallo) si TV no disponible
+    5. Auto-launch de TV Desktop en bootstrap + auto-restart si PID muere
+  - Bootstrap unificado: un solo comando arranca TV + MCP servers + heartbeat
+  - Alpha Vantage pasa a fallback
+  - Scraping pasa a último recurso
+  - Cross-validation: TV vs Alpha Vantage cuando ambas disponibles
+  - Capacidad nueva: indicadores técnicos directo del gráfico (ATR, RSI, EMA)
+  - Operating Modes basados en disponibilidad de TV:
+    TV activo + datos frescos → FULL
+    TV crasheó, auto-restart en curso → DEGRADED transitorio (~30s)
+    TV no puede arrancar → DEGRADED persistente (Alpha Vantage + scraping)
+    Todo falla → KILL SWITCH / OFFLINE
+RIESGOS ACEPTADOS:
+  - Interfaz no documentada puede romperse con actualización de TV
+  - Mitigación: pinear versión TV Desktop, monitorear repo del MCP, fork si muere
+  - ToS de TradingView pueden restringir uso automatizado
+  - Mitigación: uso local, no redistribución, no comercial
+IMPLEMENTACIÓN ACTUAL: agregar tradingview-mcp como MCP server,
+  implementar heartbeat + cache/snapshot en price-feed MCP,
+  agregar auto-launch de TV al bootstrap script,
+  agregar Operating Modes basados en disponibilidad de TV
+IMPLEMENTACIÓN IDEAL: Price Agent con adapter pattern,
+  Data Integrity Agent con cross-validation automática,
+  Operating Modes dinámicos con transición automática
+ESTADO: implementado
+
+--- D007 ---
+DECISIÓN: Eliminar OANDA API del proyecto
+FECHA: abril 2026
+CONTEXTO: no se cuenta con acceso a OANDA API (sin token, sin account ID).
+  D002 asumía OANDA como fuente primaria. Con D006 (TradingView MCP),
+  OANDA deja de ser necesaria. Mantenerla en el código y documentación
+  genera confusión sobre qué fuentes están realmente disponibles.
+DECIDIDO: eliminar toda referencia a OANDA API como fuente de datos.
+  La cascada de precio queda: TV MCP → cache/snapshot → Alpha Vantage → scraping.
+  OANDA como feed de TradingView (OANDA:XAUUSD, etc.) sigue siendo válido —
+  eso es TradingView mostrando datos de OANDA, no acceso directo a la API.
+IMPACTO:
+  - Eliminar oanda_client.py y configuraciones asociadas
+  - Actualizar cascada de precio en price-feed MCP (6 niveles → 4 niveles)
+  - D002 queda marcada como SUPERSEDIDA
+  - Documentación refleja solo fuentes realmente disponibles
+  - Cross-validation pasa a ser TV vs Alpha Vantage (no TV vs OANDA)
+IMPLEMENTACIÓN ACTUAL: limpiar código y configs que referencian OANDA API
+IMPLEMENTACIÓN IDEAL: igual — decisión de alcance, no de arquitectura
+ESTADO: implementado
