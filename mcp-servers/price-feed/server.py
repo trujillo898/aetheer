@@ -67,8 +67,7 @@ async def get_price(instrument: str) -> str:
     cache_key = f"price:{instrument}"
     cached = cache.get(cache_key)
     if cached is not None:
-        cached["from_cache"] = True
-        return json.dumps(cached)
+        return json.dumps({**cached, "from_cache": True})
 
     result = await get_price_cascade(instrument)
 
@@ -89,9 +88,7 @@ async def get_all_prices() -> str:
     cache_key = "all_prices"
     cached = cache.get(cache_key)
     if cached is not None:
-        for r in cached:
-            r["from_cache"] = True
-        return json.dumps(cached)
+        return json.dumps([{**r, "from_cache": True} for r in cached])
 
     results = []
     for inst in ("DXY", "EURUSD", "GBPUSD"):

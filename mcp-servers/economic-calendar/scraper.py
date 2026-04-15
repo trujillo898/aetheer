@@ -164,9 +164,24 @@ async def _investing_json_api(hours_ahead: int) -> list[dict]:
                         elif "previous" in td_id:
                             previous = _parse_numeric(td_text)
 
+                    # Parsear datetime del atributo — Investing envía "YYYY/MM/DD HH:MM:SS" en UTC
+                    event_dt = None
+                    if dt_attr:
+                        try:
+                            clean_dt = dt_attr.strip().replace("/", "-")
+                            parsed = datetime.strptime(clean_dt, "%Y-%m-%d %H:%M:%S")
+                            event_dt = parsed.replace(tzinfo=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                        except ValueError:
+                            pass
+
+                    if not event_dt:
+                        # Sin datetime válido no podemos ordenar ni filtrar el evento
+                        logger.debug(f"[CALENDAR] Skipping Investing event without parseable datetime: {event_name}")
+                        continue
+
                     events.append({
                         "event": event_name,
-                        "datetime_utc": dt_attr or now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "datetime_utc": event_dt,
                         "currency": currency,
                         "importance": classify_importance(event_name, source_importance),
                         "consensus": consensus,
@@ -224,9 +239,22 @@ async def _investing_html_scrape(hours_ahead: int) -> list[dict]:
                 elif "previous" in td_id:
                     previous = _parse_numeric(td_text)
 
+            # Parsear datetime — mismo formato que JSON API ("YYYY/MM/DD HH:MM:SS" UTC)
+            event_dt = None
+            if dt_attr:
+                try:
+                    clean_dt = dt_attr.strip().replace("/", "-")
+                    parsed = datetime.strptime(clean_dt, "%Y-%m-%d %H:%M:%S")
+                    event_dt = parsed.replace(tzinfo=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                except ValueError:
+                    pass
+
+            if not event_dt:
+                continue  # Descartar eventos sin datetime válido
+
             events.append({
                 "event": event_name,
-                "datetime_utc": dt_attr or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "datetime_utc": event_dt,
                 "currency": currency,
                 "importance": classify_importance(event_name, source_importance),
                 "consensus": consensus,
@@ -248,8 +276,8 @@ async def scrape_fxstreet_calendar(hours_ahead: int = 72) -> list[dict]:
     """FXStreet tiene un endpoint JSON público para el calendario."""
     events = []
     now = datetime.now(timezone.utc)
-    date_from = now.strftime("%Y-%m-%dT00:00:00Z")
-    date_to = (now + timedelta(hours=hours_ahead)).strftime("%Y-%m-%dT23:59:59Z")
+    date_from = now.strftime("%Y-%m-%dT%H:%M:%SZ")  # desde ahora, no desde 00:00
+    date_to = (now + timedelta(hours=hours_ahead)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     url = f"https://calendar-api.fxstreet.com/en/api/v1/eventDates/{date_from}/{date_to}"
     headers = {
@@ -345,9 +373,36 @@ async def scrape_tradingeconomics_calendar(hours_ahead: int = 72) -> list[dict]:
 
                 event_name = tds[2].get_text(strip=True) if len(tds) > 2 else "Unknown"
 
+                # Intentar extraer datetime real de tds[0] o atributos del row
+                event_dt = None
+                dt_candidates = [
+                    row.get("data-date", ""),
+                    row.get("data-event-datetime", ""),
+                    tds[0].get_text(strip=True) if tds else "",
+                ]
+                for candidate in dt_candidates:
+                    if not candidate:
+                        continue
+                    try:
+                        from dateutil import parser as dateparser
+                        parsed = dateparser.parse(candidate)
+                        if parsed:
+                            if parsed.tzinfo is None:
+                                parsed = parsed.replace(tzinfo=timezone.utc)
+                            event_dt = parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
+                            break
+                    except Exception:
+                        continue
+
+                if not event_dt:
+                    # Sin datetime real no podemos incluir el evento — fecha incorrecta
+                    # es peor que no tener el evento
+                    logger.debug(f"[CALENDAR] Skipping TradingEconomics event without parseable datetime: {event_name}")
+                    continue
+
                 events.append({
                     "event": event_name,
-                    "datetime_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "datetime_utc": event_dt,
                     "currency": currency,
                     "importance": classify_importance(event_name),
                     "consensus": _parse_numeric(tds[5].get_text(strip=True)) if len(tds) > 5 else None,

@@ -209,11 +209,14 @@ def fetch_macro_news(hours: int = 24, filter_mode: str = "all") -> list[dict]:
     return articles
 
 
-def fetch_geopolitics_news() -> list[dict]:
+def fetch_geopolitics_news(hours: int = 72) -> list[dict]:
     """Fetch high-impact geopolitics news with strict filtering and health monitoring.
 
     Only returns events matching geopolitical keywords related to
     G7/G20 conflicts, sanctions, energy crises, supply chain disruptions.
+
+    Args:
+        hours: Only include news from last N hours (default: 72).
     """
     articles = []
 
@@ -228,6 +231,10 @@ def fetch_geopolitics_news() -> list[dict]:
 
             source_articles = 0
             for entry in feed.entries:
+                date_str = _parse_date(entry)
+                if not _hours_old(date_str, hours):
+                    continue
+
                 title = entry.get("title", "").strip()
                 summary = _get_summary(entry)
                 combined_text = f"{title} {summary}".lower()
@@ -250,7 +257,7 @@ def fetch_geopolitics_news() -> list[dict]:
                 articles.append({
                     "title": title,
                     "source": source_name,
-                    "datetime_utc": _parse_date(entry),
+                    "datetime_utc": date_str,
                     "summary": summary,
                     "matched_keywords": matching_keywords,
                     "risk_sentiment": sentiment,

@@ -126,17 +126,21 @@ async def get_upcoming_events(hours_ahead: int = 72) -> str:
         except Exception as e:
             logger.warning(f"Failed to store events: {e}")
 
-    # Separate upcoming (no actual) vs past
-    upcoming = [e for e in events if e.get("actual") is None]
+    # Filtrar eventos futuros: sin actual publicado Y datetime en el futuro
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    upcoming = [
+        e for e in events
+        if e.get("actual") is None and (e.get("datetime_utc") or "") >= now_iso
+    ]
     result = json.dumps({
         "upcoming_events": upcoming[:30],
         "total_found": len(events),
         "upcoming_count": len(upcoming),
         "source": source,
         "from_cache": False,
-        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "timestamp": now_iso,
     })
-    cache.set(cache_key, result, ttl_seconds=1800)
+    cache.set(cache_key, result, ttl_seconds=300)  # 5 min — eventos publicados se reflejan rápido
     return result
 
 
