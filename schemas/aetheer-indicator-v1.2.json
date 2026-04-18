@@ -1,0 +1,32 @@
+{
+  "$schema": "https://aetheer.local/schemas/aetheer-indicator-v1.2.json",
+  "type": "object",
+  "properties": {
+    "aetheer_version": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$"},
+    "timestamp_utc": {"type": "number", "description": "Epoch milliseconds"},
+    "symbol": {"type": "string"},
+    "timeframe": {"type": "string", "enum": ["1", "3", "5", "15", "30", "60", "240", "D", "W"]},
+    
+    "atr14": {"type": "number"},
+    "atr_expanding": {"type": "boolean"},
+    "vol_rel": {"type": "number"},
+    
+    "ema_align": {"type": "string", "enum": ["bullish", "bearish", "mixed"]},
+    "price_phase": {"type": "string", "enum": ["compression", "expansion", "transition"]},
+    "rsi_div": {"type": "string", "enum": ["bull_div", "bear_div", "none"]},
+    
+    "session": {"type": "string", "enum": ["Asian", "London", "NewYork", "London-NY-Overlap", "OffHours"]},
+    "sess_break": {"type": "string", "enum": ["broke_high", "broke_low", "inside"]},
+    
+    "prev_day_high": {"type": ["number", "null"]},
+    "prev_day_low": {"type": ["number", "null"]},
+    
+    "htf_d1_ema_align": {"type": ["string", "null"]},
+    "htf_h4_ema_align": {"type": ["string", "null"]},
+    
+    "data_quality": {"type": "string", "enum": ["high", "medium", "low", "unavailable"]},
+    "source": {"type": "string", "const": "tradingview"},
+    "age_hours": {"type": "number", "minimum": 0}
+  },
+  "required": ["aetheer_version", "timestamp_utc", "symbol", "timeframe", "session", "ema_align", "price_phase"]
+}

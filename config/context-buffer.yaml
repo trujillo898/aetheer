@@ -24,7 +24,7 @@ buffer:
 
 anti_patterns:
   overloading:
-    trigger: "utilization > 90% AND fragmentation > 0.5"
+    trigger: "utilization > 95% AND fragmentation > 0.5"
     action: "aggressive_prune"
   underflow:
     trigger: "utilization < 30%"

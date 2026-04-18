@@ -1,0 +1,76 @@
+{
+  "$schema": "https://aetheer.local/schemas/events-v1.1.json",
+  "agent": "events",
+  "agent_version": "1.1.0",
+  "execution_meta": {
+    "calendar_source": "economic-calendar | memory_cache | unavailable",
+    "price_feed_source": "tradingview | cache | alpha_vantage",
+    "operating_mode": "FULL | DEGRADED_TRANSIENT | DEGRADED_PERSISTENT | OFFLINE",
+    "events_analyzed": 12,
+    "high_impact_count": 3,
+    "processing_duration_ms": 1847,
+    "data_quality": "high | medium | low | unavailable"
+  },
+  "upcoming_events": [
+    {
+      "event_id": "evt-us-cpi-20260420",
+      "event": "US CPI m/m",
+      "datetime_utc": "2026-04-20T12:30:00Z",
+      "currency": "USD",
+      "importance": "high",
+      "consensus": 0.3,
+      "previous": 0.2,
+      "revision_expected": false,
+      "market_focus": "core_vs_headline",
+      "historical_volatility_avg_pips": 47,
+      "priced_in_probability": 0.35
+    }
+  ],
+  "last_event": {
+    "event_id": "evt-us-nfp-20260405",
+    "event": "US Non-Farm Payrolls",
+    "datetime_utc": "2026-04-05T12:30:00Z",
+    "expected": 200,
+    "actual": 236,
+    "previous_revision": 185,
+    "surprise_magnitude_pp": 0.18,
+    "surprise_direction": "hawkish",
+    "price_reaction": {
+      "dxy_pct": 0.42,
+      "eurusd_pct": -0.31,
+      "gbpusd_pct": -0.28,
+      "max_deviation_pips_dxy": 38,
+      "reaction_duration_minutes": 45,
+      "volume_spike": true,
+      "direction": "bullish_usd"
+    },
+    "priced_in": {
+      "value": false,
+      "confidence": 0.78,
+      "reason": "pre_event_consolidation_no_breakout"
+    },
+    "causal_chain": {
+      "trigger": "NFP +36K vs consenso, revisión al alza de mes anterior",
+      "immediate_effect": "USD strength: DXY +0.42% en 15min, US10Y +7bps",
+      "secondary_effect": "EURUSD -0.31%, GBPUSD -0.28%, correlación con yields se mantiene",
+      "structural_implication": "Refuerza narrativa de economía US resiliente → Fed menos presionado para cortar",
+      "invalid_condition": "Si CPI próximo <0.2% → reversión de narrativa probable",
+      "confidence": 0.74,
+      "timeframe_relevance": ["H4", "D1"]
+    }
+  },
+  "event_risk_next_24h": {
+    "level": "high | medium | low",
+    "drivers": ["US CPI", "ECB speech"],
+    "expected_volatility_pips": {"dxy": 35, "eurusd": 42, "gbpusd": 48},
+    "liquidity_warning": "Asian session thin liquidity → mayor slippage potencial"
+  },
+  "historical_context": {
+    "similar_events_last_90d": 4,
+    "avg_reaction_direction_consistency": 0.75,
+    "priced_in_frequency": 0.4
+  },
+  "memory_stored": true,
+  "memory_key": "evt-analysis-20260417T1430Z",
+  "timestamp": "ISO8601"
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://aetheer.local/schemas/liquidity-v1.1.json",
+  "agent": "liquidity",
+  "agent_version": "1.1.0",
+  "execution_meta": {
+    "price_feed_source": "tradingview | cache | alpha_vantage | scraped",
+    "aetheer_indicator_available": true,
+    "timeframes_analyzed": ["M15", "H1"],
+    "operating_mode": "FULL | DEGRADED_TRANSIENT | DEGRADED_PERSISTENT | OFFLINE",
+    "data_quality": "high | medium | low | unavailable",
+    "processing_duration_ms": 412,
+    "symbols_analyzed": ["DXY", "EURUSD", "GBPUSD"]
+  },
+  "session": "London | NewYork | Asian | London-NY-Overlap",
+  "session_window_utc": "HH:MM-HH:MM",
+  "liquidity_level": "high | medium | low | unavailable",
+  "liquidity_classification_reason": "volatility_percentile=78 + relative_activity=1.4",
+  "volatility_current_pips": 12.4,
+  "volatility_percentile_vs_30d": 78,
+  "volatility_trend": "expanding | stable | contracting",
+  "historical_consistency": 0.73,
+  "relative_activity_score": 1.4,
+  "optimal_windows_utc": ["13:00-15:00", "08:30-10:00"],
+  "optimal_windows_rationale": "High win_rate + ATR expansion + session overlap",
+  "atr_14_current": 11.8,
+  "atr_14_sma": 10.2,
+  "atr_expanding": true,
+  "session_structure": {
+    "current_range_pips": 45,
+    "prev_session_break": "broke_high",
+    "key_level_tested": "PREV_SESSION_HIGH",
+    "time_until_session_end_hours": 2.3
+  },
+  "notes": "Overlap London-NY activo: liquidez alta, volatilidad en percentil 78",
+  "alerts": [],
+  "memory_stored": true,
+  "memory_key": "liq-DXY-20260417T1430Z-London",
+  "timestamp": "ISO8601"
+}

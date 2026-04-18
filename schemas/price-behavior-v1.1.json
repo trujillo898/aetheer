@@ -1,0 +1,69 @@
+{
+  "$schema": "https://aetheer.local/schemas/price-behavior-v1.1.json",
+  "agent": "price_behavior",
+  "agent_version": "1.1.0",
+  "execution_meta": {
+    "timeframes_analyzed": ["M15", "H1", "H4", "D1"],
+    "bars_per_tf": 100,
+    "data_sources_used": ["tradingview", "cache"],
+    "analysis_duration_ms": 2847,
+    "operating_mode": "FULL"
+  },
+  "instruments": {
+    "dxy": {
+      "structure": "trending_bullish | trending_bearish | range | compression | volatile",
+      "phase": "expansion | compression | transition",
+      "data_quality": "high | medium | low | unavailable",
+      "source": "tradingview | cache | alpha_vantage | scraped",
+      "source_timestamp": "ISO8601",
+      "range_high": 0.0,
+      "range_low": 0.0,
+      "last_breakout_direction": "up | down | none",
+      "breakout_held": true,
+      "aetheer_data": {
+        "ema_align": "bullish | bearish | mixed",
+        "price_vs_ema200": "above | below | at",
+        "rsi14": 0.0,
+        "rsi_div": "bull_div | bear_div | none",
+        "bollinger_width_percentile": 0.0
+      }
+    },
+    "eurusd": { "...mismo schema..." },
+    "gbpusd": { "...mismo schema..." }
+  },
+  "multi_tf_structure": {
+    "M15": { "phase": "expansion", "ema_align": "bullish", "rsi_div": "bull_div", "key_level_tested": "PREV_DAY_HIGH" },
+    "H1": { "...mismo schema..." },
+    "H4": { "...mismo schema..." },
+    "D1": { "...mismo schema..." },
+    "W1": { "...mismo schema..." }
+  },
+  "causal_chains": [
+    {
+      "id": "CC-001",
+      "cause": "EMA200 roto al alza en H4 + ATR expanding",
+      "effect": "Mayor probabilidad de continuación alcista en D1",
+      "invalid_condition": "Pérdida de H1 low + cierre por debajo EMA50",
+      "confidence": 0.78,
+      "timeframe": "H4",
+      "supporting_evidence": ["volume_spike", "rsi_bull_div", "session_alignment"],
+      "contradicting_evidence": ["D1_ema_mixed"]
+    }
+  ],
+  "dominant_pattern": "descripción breve del patrón dominante (máx 140 chars)",
+  "breakout_probability_next_4h": {
+    "value": 0.65,
+    "method": "historical_frequency | ml_model | heuristic",
+    "sample_size": 47,
+    "confidence_interval": [0.52, 0.78]
+  },
+  "aetheer_indicator_valid": true,
+  "aetheer_validation_notes": "EMA align coherente en H4/D1; RSI div en M15 sugiere posible pullback",
+  "session_analysis": {
+    "active_session": "london | ny | asia | overlap",
+    "session_behavior": "london_breaking_asia_range | ny_confirming | asia_consolidating"
+  },
+  "memory_stored": true,
+  "memory_key": "pb-DXY-20260415-H4-expansion",
+  "timestamp": "ISO8601"
+}

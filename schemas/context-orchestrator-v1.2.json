@@ -1,0 +1,72 @@
+{
+  "$schema": "https://aetheer.local/schemas/context-orchestrator-v1.2.json",
+  "agent": "context_orchestrator",
+  "agent_version": "1.2.0",
+  "execution_meta": {
+    "query_intent_inferred": "full_analysis",
+    "intent_confidence": 0.92,
+    "operating_mode_effective": "FULL | DEGRADED_TRANSIENT | DEGRADED_PERSISTENT | OFFLINE",
+    "sources_status": {
+      "price_feed": "ok | degraded | down",
+      "memory": "ok | degraded | down",
+      "tools": "ok | partial | down"
+    },
+    "processing_duration_ms": 847,
+    "tokens_budget": 4096,
+    "tokens_used": 3214
+  },
+  "query_intent": "full_analysis | punctual | data_point | system_health",
+  "attention_window": "descripción de la ventana temporal y temática",
+  "context_budget_tokens": 4096,
+  "context_utilization_pct": 78.4,
+  "bridge_summary": {
+    "included": true,
+    "reason": "gap_5.2h_since_last_full_analysis",
+    "content": "resumen ejecutivo de 3-5 líneas"
+  },
+  "packages": {
+    "liquidity": [
+      {"item": "key_levels_DXY", "priority": "urgent", "relevance": 0.94, "source": "memory:pb-20260415"},
+      {"item": "session_overlap_status", "priority": "standard", "relevance": 0.87}
+    ],
+    "events": ["items con metadata similar"],
+    "price_behavior": ["items con metadata similar"],
+    "macro": ["items con metadata similar"],
+    "synthesis": [
+      {"item": "user_context_profile", "priority": "standard"},
+      {"item": "recent_causal_chains", "priority": "standard"}
+    ],
+    "governor": [
+      {"item": "operating_mode", "priority": "urgent", "required": true},
+      {"item": "quality_score_global", "priority": "urgent", "required": true},
+      {"item": "approved", "priority": "urgent", "required": true},
+      {"item": "blocking_reasons", "priority": "urgent", "conditional": "if !approved"}
+    ]
+  },
+  "pruned_items": {
+    "count": 12,
+    "by_reason": {
+      "time_decay": 8,
+      "low_relevance": 3,
+      "operating_mode_filter": 1
+    }
+  },
+  "fragmentation_score": 0.23,
+  "fragmentation_details": {
+    "definition": "0.0=cohesivo, 1.0=altamente fragmentado",
+    "calculation": "1 - (items_compartidos_entre_paquetes / total_items)"
+  },
+  "decay_executed": true,
+  "decay_summary": {
+    "items_evaluated": 147,
+    "items_updated": 23,
+    "items_removed": 8
+  },
+  "alerts": [
+    {"level": "info | warning | error", "code": "INTENT_LOW_CONFIDENCE", "message": "Confianza 0.58 en clasificación"}
+  ],
+  "anti_patterns_detected": [],
+  "memory_write_status": "success | skipped | failed",
+  "memory_key_archived": "co-full-20260415T1430Z",
+  "timestamp": "ISO8601"
+}

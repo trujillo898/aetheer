@@ -18,6 +18,8 @@ price_sources:
       gb10y: "TVC:GB10Y"
     quality_score: 0.98
     note: "OANDA: prefix es el exchange dentro de TradingView — no es la API de OANDA."
+    supports_deep_read: true 
+    requires_indicator_setup: true 
 
   - name: alpha_vantage
     priority: 1
