@@ -386,56 +386,73 @@ def read_aetheer_data(symbol: str, timeframe: str) -> dict:
 
 ### Esquema de Base de Datos (`db/aetheer.db`)
 ```sql
--- Tablas principales
+-- FUENTE DE VERDAD: schema real en DB. Migraciones en db/migrations/
 CREATE TABLE price_snapshots (
-    id INTEGER PRIMARY KEY,
-    symbol TEXT NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instrument TEXT NOT NULL,       -- 'DXY', 'EURUSD', 'GBPUSD'
     price REAL NOT NULL,
     source TEXT NOT NULL,
     timestamp_utc TEXT NOT NULL,
-    age_hours REAL GENERATED ALWAYS AS (...) STORED
+    created_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE events (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_name TEXT NOT NULL,
-    datetime_utc TEXT NOT NULL,
-    currency TEXT,
-    importance TEXT,  -- high|medium|low
-    actual REAL, expected REAL, previous REAL,
+    currency TEXT NOT NULL,
+    importance TEXT NOT NULL,       -- 'high'|'medium'|'low'
+    expected REAL,
+    actual REAL,
+    previous REAL,
+    previous_revision REAL,
+    surprise_direction TEXT,
     price_reaction_dxy_pct REAL,
-    priced_in BOOLEAN,
-    stored_at TEXT DEFAULT CURRENT_TIMESTAMP
+    reaction_duration_min INTEGER,
+    priced_in INTEGER DEFAULT 0,    -- 0|1 (boolean)
+    event_datetime_utc TEXT NOT NULL,
+    source TEXT DEFAULT 'live',
+    result_status TEXT DEFAULT 'pending',
+    preloaded_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE context_memory (
-    id INTEGER PRIMARY KEY,
-    key TEXT UNIQUE NOT NULL,  -- hash del contenido
-    content_type TEXT NOT NULL,  -- analysis_summary|causal_chain|user_pref
-    content TEXT NOT NULL,  -- JSON comprimido
-    relevance_score REAL DEFAULT 1.0,
-    last_accessed TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    layer TEXT NOT NULL CHECK(layer IN ('short', 'medium', 'long')),
+    category TEXT NOT NULL,         -- 'analysis_summary'|'causal_chain'|'user_pref'|etc.
+    content TEXT NOT NULL,          -- JSON (comprimido si compressed=1)
+    relevance_base REAL DEFAULT 1.0,
+    relevance_current REAL DEFAULT 1.0,
+    decay_factor REAL DEFAULT 0.95,
+    access_count INTEGER DEFAULT 0,
+    compressed INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    last_accessed TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE agent_outputs (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_name TEXT NOT NULL,
-    query_intent TEXT,
-    output_hash TEXT UNIQUE,  -- sha256 del JSON
     output_json TEXT NOT NULL,
-    operating_mode TEXT,
-    quality_score REAL,
-    stored_at TEXT DEFAULT CURRENT_TIMESTAMP
+    query_intent TEXT,
+    output_hash TEXT,               -- sha256 del JSON (migration 003)
+    operating_mode TEXT DEFAULT 'UNKNOWN',  -- 'FULL'|'DEGRADED_TRANSIENT'|etc. (migration 003)
+    quality_score REAL,             -- (migration 003)
+    created_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE heartbeat_log (
-    id INTEGER PRIMARY KEY,
-    component TEXT NOT NULL,  -- price-feed|memory|agent:xyz
-    status TEXT NOT NULL,  -- ok|degraded|down
-    details TEXT,
-    timestamp_utc TEXT NOT NULL
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL,           -- 'ok'|'degraded'|'down'
+    agents_status TEXT NOT NULL,    -- JSON con estado por agente
+    sources_status TEXT NOT NULL,   -- JSON con estado por fuente
+    context_health TEXT NOT NULL,   -- JSON con métricas de contexto
+    kill_switch_active INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- Tablas adicionales: session_stats, yields_history, feed_status,
+-- fedwatch_history, deep_snapshots — ver db/migrations/ para detalle
 ```
 
 ### Time Decay Factors (decay.yaml)

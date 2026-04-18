@@ -69,15 +69,15 @@ FASE 1 — IMPLEMENTADO Y FUNCIONANDO
 PENDIENTE — FASE 2
 ================================================================================
 
-[ ] D008: Lectura multi-símbolo vía tab switching (quote_get solo lee chart activo)
-[ ] D008: Lectura multi-timeframe vía chart_set_timeframe (D1, H4, H1, M30, M15, M5)
-[ ] D009: Indicador Pine Script "Aetheer Indicator" (tabla consolidada)
+[x] D008: Lectura multi-símbolo vía tab switching (quote_get solo lee chart activo)
+[x] D008: Lectura multi-timeframe vía chart_set_timeframe (D1, H4, H1, M30, M15, M5)
+[x] D009: Indicador Pine Script "Aetheer Indicator" (tabla consolidada)
 [ ] Data Integrity Agent como gate formal (quality scores continuos, no solo precio)
 [ ] Confidence Service transversal (score desglosado por dimensión)
-[ ] Governor Agent (validación pre-output, detección de contradicciones)
-[ ] Operating Modes formales (FULL/DEGRADED/MINIMAL/OFFLINE)
+[x] Governor Agent (validación pre-output, detección de contradicciones)
+[x] Operating Modes formales (FULL/DEGRADED/MINIMAL/OFFLINE)
 [ ] Attention Mechanism (tema dominante del mercado, attention weights)
-[ ] Causal Engine formal (SCM con librería, no cadenas de texto)
+[x] Causal Engine formal (SCM con librería, no cadenas de texto)
 [ ] Regime Detection (risk-on/off, trending/ranging, crisis)
 [ ] Episodic Memory con grafos causales
 [ ] Learning Loop con Reflection Agent

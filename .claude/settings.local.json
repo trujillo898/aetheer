@@ -40,7 +40,10 @@
       "Read(//usr/bin/**)",
       "Bash(/home/thomas/aetheer/.venv/bin/python -c \"import sys; print\\(sys.version\\); import httpx; print\\('httpx:', httpx.__version__\\)\")",
       "Bash(python3.14 -c \"import sys; print\\(sys.version\\); print\\(sys.executable\\)\")",
-      "Bash(dpkg -l)"
+      "Bash(dpkg -l)",
+      "mcp__memory__get_current_time",
+      "mcp__price-feed__read_market_data_tool",
+      "Bash(sqlite3 *)"
     ]
   },
   "enabledMcpjsonServers": [

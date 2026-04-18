@@ -4,7 +4,7 @@
 // PROPÓSITO: Exportar datos estructurados vía JSON para consumo programático
 // NO USAR como indicador visual de trading - la tabla es solo para debug
 // ============================================================================
-indicator("Aetheer", overlay=true, max_labels_count=500, max_lines_count=500, max_tables_count=1)
+indicator("Aetheer", overlay=true, max_labels_count=500, max_lines_count=500)
 
 // ============================================================================
 // CONFIGURACIÓN
@@ -153,76 +153,42 @@ m15_volatility = include_htf ? request.security(syminfo.tickerid, "15", atr14, l
 // Este objeto JSON es consumido por los agentes vía price-feed MCP server
 // Cualquier cambio aquí requiere actualizar schemas en agents/
 
-json_payload = json.fromobject({
-    // Metadata de trazabilidad (D006: Operating Modes)
-    "aetheer_version": "1.2.0",
-    "timestamp_utc": timenow,  // Epoch ms - agentes calculan age_hours
-    "symbol": syminfo.ticker,
-    "timeframe": timeframe.period,
-    "bar_time": time,  // Epoch ms de la barra actual
-    
-    // Volatilidad / Liquidez
-    "atr14": math.round(atr14, 5),
-    "atr14_sma": math.round(atr14_sma, 5),
-    "atr_expanding": atr_expand,
-    "vol_rel": math.round(vol_rel, 2),
-    "session_range": math.round(session_range, 5),
-    
-    // Estructura de Precio
-    "ema20": math.round(ema20, 5),
-    "ema50": math.round(ema50, 5),
-    "ema200": math.round(ema200, 5),
-    "price_vs_ema20": price_vs_ema20,
-    "price_vs_ema50": price_vs_ema50,
-    "price_vs_ema200": price_vs_ema200,
-    "ema_align": ema_align,
-    
-    // RSI / Momentum
-    "rsi14": math.round(rsi14, 2),
-    "rsi_div": rsi_div,
-    
-    // Price Phase
-    "price_phase": price_phase,
-    "bb_width": math.round(bb_width, 4),
-    "bb_width_percentile": na,  // Placeholder - calcular en agente con histórico
-    
-    // Sesiones
-    "session": current_session,  // "Asian" | "London" | "NewYork" | "London-NY-Overlap"
-    "sess_high": math.round(sess_high, 5),
-    "sess_low": math.round(sess_low, 5),
-    "prev_sess_high": math.round(prev_sess_high, 5),
-    "prev_sess_low": math.round(prev_sess_low, 5),
-    "sess_break": sess_break,  // "broke_high" | "broke_low" | "inside"
-    
-    // Niveles Clave (solo si habilitado)
-    "prev_day_high": include_levels ? math.round(prev_day_high, 5) : null,
-    "prev_day_low": include_levels ? math.round(prev_day_low, 5) : null,
-    "day_open": include_levels ? math.round(day_open, 5) : null,
-    "prev_week_high": include_levels ? math.round(prev_week_high, 5) : null,
-    "prev_week_low": include_levels ? math.round(prev_week_low, 5) : null,
-    
-    // Contexto Multi-Timeframe (solo si habilitado)
-    "htf_d1_ema_align": d1_ema_align,
-    "htf_h4_ema_align": h4_ema_align,
-    "htf_h1_phase": h1_phase,
-    "htf_m15_atr14": include_htf ? math.round(m15_volatility, 5) : null,
-    
-    // Calidad de datos (para Operating Modes)
-    "data_quality": "high",  // Placeholder - MCP server puede sobrescribir
-    "source": "tradingview"  // Confirmado por MCP server
-})
+// Helpers para construcción de JSON válido
+f_f(v, d) => na(v) ? "null" : str.tostring(math.round(v, d))
+f_b(v)    => v ? "true" : "false"
+
+// Construir JSON por partes para legibilidad
+_j1 = '{"aetheer_version":"1.2.0","timestamp_utc":' + str.tostring(timenow) +
+      ',"symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period +
+      '","bar_time":' + str.tostring(time)
+_j2 = ',"atr14":' + f_f(atr14, 5) + ',"atr14_sma":' + f_f(atr14_sma, 5) +
+      ',"atr_expanding":' + f_b(atr_expand) + ',"vol_rel":' + f_f(vol_rel, 2) +
+      ',"session_range":' + f_f(session_range, 5)
+_j3 = ',"ema20":' + f_f(ema20, 5) + ',"ema50":' + f_f(ema50, 5) +
+      ',"ema200":' + f_f(ema200, 5) + ',"price_vs_ema20":"' + price_vs_ema20 +
+      '","price_vs_ema50":"' + price_vs_ema50 + '","price_vs_ema200":"' + price_vs_ema200 +
+      '","ema_align":"' + ema_align + '"'
+_j4 = ',"rsi14":' + f_f(rsi14, 2) + ',"rsi_div":"' + rsi_div +
+      '","price_phase":"' + price_phase + '","bb_width":' + f_f(bb_width, 4) +
+      ',"bb_width_percentile":null'
+_j5 = ',"session":"' + current_session + '","sess_high":' + f_f(sess_high, 5) +
+      ',"sess_low":' + f_f(sess_low, 5) + ',"prev_sess_high":' + f_f(prev_sess_high, 5) +
+      ',"prev_sess_low":' + f_f(prev_sess_low, 5) + ',"sess_break":"' + sess_break + '"'
+_j6 = ',"prev_day_high":' + (include_levels ? f_f(prev_day_high, 5) : "null") +
+      ',"prev_day_low":' + (include_levels ? f_f(prev_day_low, 5) : "null") +
+      ',"day_open":' + (include_levels ? f_f(day_open, 5) : "null") +
+      ',"prev_week_high":' + (include_levels ? f_f(prev_week_high, 5) : "null") +
+      ',"prev_week_low":' + (include_levels ? f_f(prev_week_low, 5) : "null")
+_j7 = ',"htf_d1_ema_align":"' + d1_ema_align + '","htf_h4_ema_align":"' + h4_ema_align +
+      '","htf_h1_phase":"' + h1_phase + '","htf_m15_atr14":' +
+      (include_htf ? f_f(m15_volatility, 5) : "null") +
+      ',"data_quality":"high","source":"tradingview"}'
+
+json_payload = _j1 + _j2 + _j3 + _j4 + _j5 + _j6 + _j7
 
 // Label oculto para exportación (MCP lee el texto del label)
 // Usamos color transparente para no interferir visualmente
-var label json_label = label.new(
-     bar_index, 
-     na, 
-     json_payload, 
-     style=label.style_none,
-     color=color.new(color.black, 100), 
-     textcolor=color.new(color.black, 100),
-     xloc=xloc.bar_index
-)
+var label json_label = label.new(bar_index, na, json_payload, style=label.style_none, color=color.new(color.black, 100), textcolor=color.new(color.black, 100), xloc=xloc.bar_index)
 label.set_x(json_label, bar_index)
 label.set_y(json_label, close)
 
@@ -230,16 +196,17 @@ label.set_y(json_label, close)
 // TABLA DEBUG (SOLO VISUAL - OPCIONAL)
 // ============================================================================
 if debug_table and barstate.islast
-    var table debug_tbl = table.new(position.bottom_right, 2, 40, 
-         bgcolor=color.new(color.black, 85), frame_color=color.gray, frame_width=1)
+    var table debug_tbl = table.new(position.bottom_right, 2, 40, bgcolor=color.new(color.black, 85), frame_color=color.gray, frame_width=1)
     
     row = 0
     // Header
-    table.cell(debug_tbl, 0, row, "AETHEER v1.2", text_color=color.blue, text_size=size.small, colspan=2)
+    table.cell(debug_tbl, 0, row, "AETHEER v1.2", text_color=color.blue, text_size=size.small)
+    table.cell(debug_tbl, 1, row, "", text_color=color.blue, text_size=size.small)
     row += 1
-    
+
     // Volatilidad
-    table.cell(debug_tbl, 0, row, "📊 VOLATILIDAD", text_color=color.yellow, text_size=size.tiny, colspan=2)
+    table.cell(debug_tbl, 0, row, "📊 VOLATILIDAD", text_color=color.yellow, text_size=size.tiny)
+    table.cell(debug_tbl, 1, row, "", text_color=color.yellow, text_size=size.tiny)
     row += 1
     table.cell(debug_tbl, 0, row, "ATR14", text_color=color.white, text_size=size.tiny)
     table.cell(debug_tbl, 1, row, str.tostring(math.round(atr14, 3), "#.###"), text_color=color.white, text_size=size.tiny)
@@ -252,7 +219,8 @@ if debug_table and barstate.islast
     row += 1
     
     // Estructura
-    table.cell(debug_tbl, 0, row, "📐 ESTRUCTURA", text_color=color.yellow, text_size=size.tiny, colspan=2)
+    table.cell(debug_tbl, 0, row, "📐 ESTRUCTURA", text_color=color.yellow, text_size=size.tiny)
+    table.cell(debug_tbl, 1, row, "", text_color=color.yellow, text_size=size.tiny)
     row += 1
     table.cell(debug_tbl, 0, row, "EMA_ALIGN", text_color=color.white, text_size=size.tiny)
     align_color = ema_align == "bullish" ? color.green : ema_align == "bearish" ? color.red : color.orange
@@ -268,7 +236,8 @@ if debug_table and barstate.islast
     row += 1
     
     // Sesión
-    table.cell(debug_tbl, 0, row, "🕐 SESIÓN", text_color=color.yellow, text_size=size.tiny, colspan=2)
+    table.cell(debug_tbl, 0, row, "🕐 SESIÓN", text_color=color.yellow, text_size=size.tiny)
+    table.cell(debug_tbl, 1, row, "", text_color=color.yellow, text_size=size.tiny)
     row += 1
     table.cell(debug_tbl, 0, row, "CURRENT", text_color=color.white, text_size=size.tiny)
     table.cell(debug_tbl, 1, row, current_session, text_color=color.blue, text_size=size.tiny)
@@ -280,7 +249,8 @@ if debug_table and barstate.islast
     
     // Niveles clave
     if include_levels
-        table.cell(debug_tbl, 0, row, "🎯 NIVELES", text_color=color.yellow, text_size=size.tiny, colspan=2)
+        table.cell(debug_tbl, 0, row, "🎯 NIVELES", text_color=color.yellow, text_size=size.tiny)
+        table.cell(debug_tbl, 1, row, "", text_color=color.yellow, text_size=size.tiny)
         row += 1
         table.cell(debug_tbl, 0, row, "PREV_DAY_HIGH", text_color=color.white, text_size=size.tiny)
         table.cell(debug_tbl, 1, row, str.tostring(prev_day_high, "#.#####"), text_color=color.white, text_size=size.tiny)
@@ -290,7 +260,8 @@ if debug_table and barstate.islast
         row += 1
     
     // Meta
-    table.cell(debug_tbl, 0, row, "⚙️ META", text_color=color.gray, text_size=size.tiny, colspan=2)
+    table.cell(debug_tbl, 0, row, "⚙️ META", text_color=color.gray, text_size=size.tiny)
+    table.cell(debug_tbl, 1, row, "", text_color=color.gray, text_size=size.tiny)
     row += 1
     table.cell(debug_tbl, 0, row, "TF", text_color=color.gray, text_size=size.tiny)
     table.cell(debug_tbl, 1, row, timeframe.period, text_color=color.gray, text_size=size.tiny)
