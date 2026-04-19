@@ -97,22 +97,32 @@ def _get_alpha_vantage_client():
 # --- Individual fetcher functions (independientes e importables) ---
 
 
+# Mapping símbolo TV → índice de tab (setup estándar Aetheer: Tab0=DXY, Tab1=EURUSD, Tab2=GBPUSD)
+TV_SYMBOL_TO_TAB: dict[str, int] = {
+    "TVC:DXY":    0,
+    "OANDA:EURUSD": 1,
+    "OANDA:GBPUSD": 2,
+}
+
+
 async def fetch_from_tradingview(instrument: str) -> dict | None:
     """Fetch price from TradingView MCP (prioridad 0).
 
-    Solo funciona cuando TV Desktop está corriendo con --remote-debugging-port=9222.
+    Si el chart activo ya muestra el símbolo pedido → lee sin interferencia.
+    Si no, hace tab switch al tab configurado, lee y restaura el tab original.
     Fallback silencioso si TV no está disponible — no bloquea la cascada.
-
-    NOTA: Cambia el símbolo activo del gráfico del trader (limitación MVP).
     """
     try:
-        from shared.tv_availability import is_tv_available, get_tv_quote
+        from shared.tv_availability import is_tv_available, get_tv_commands
         if not is_tv_available():
             return None
         tv_symbol = TV_SYMBOLS.get(instrument)
         if not tv_symbol:
             return None
-        quote = get_tv_quote(tv_symbol)
+        tv = await get_tv_commands()
+        if tv is None:
+            return None
+        quote = await tv.get_quote_for_symbol(tv_symbol, TV_SYMBOL_TO_TAB)
         if quote:
             price = quote.get("close") or quote.get("last")
             if price:
@@ -321,23 +331,25 @@ async def get_correlations_prices(instruments: list[str]) -> dict[str, dict]:
     """
     results: dict[str, dict] = {}
 
-    # Intentar TradingView primero
+    # Intentar TradingView para el chart activo (correlaciones no tienen tab dedicado)
     try:
-        from shared.tv_availability import is_tv_available, get_tv_quote
+        from shared.tv_availability import is_tv_available, get_tv_commands
         if is_tv_available():
-            for instr in instruments:
-                tv_symbol = TV_SYMBOLS.get(instr)
-                if not tv_symbol:
-                    continue
-                quote = get_tv_quote(tv_symbol)
-                if quote and (quote.get("close") or quote.get("last")):
-                    price = quote.get("close") or quote.get("last")
-                    results[instr] = {
-                        "price": round(float(price), 5),
-                        "change_pct": None,
-                        "source": "tradingview",
-                        "timestamp": _now_utc(),
-                    }
+            tv = await get_tv_commands()
+            if tv:
+                quote = await tv.get_quote()
+                if quote:
+                    active_tv_symbol = (quote.get("symbol") or "").upper()
+                    for instr in instruments:
+                        tv_symbol = TV_SYMBOLS.get(instr, "").upper()
+                        if tv_symbol and active_tv_symbol == tv_symbol and (quote.get("close") or quote.get("last")):
+                            price = quote.get("close") or quote.get("last")
+                            results[instr] = {
+                                "price": round(float(price), 5),
+                                "change_pct": None,
+                                "source": "tradingview",
+                                "timestamp": _now_utc(),
+                            }
     except Exception as e:
         logger.warning(f"TV correlations fetch failed: {e}")
 

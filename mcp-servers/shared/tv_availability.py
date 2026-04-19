@@ -172,6 +172,21 @@ async def get_tv_screenshot() -> Optional[str]:
     return None
 
 
+async def get_tv_quote_for_symbol(
+    tv_symbol: str,
+    symbol_to_tab: Optional[dict] = None,
+) -> Optional[dict]:
+    """Quote para un símbolo específico, con tab switch o set_symbol como fallback."""
+    try:
+        tv = await get_tv_commands()
+        if tv is None:
+            return None
+        return await tv.get_quote_for_symbol(tv_symbol, symbol_to_tab)
+    except Exception as e:
+        logger.debug(f"get_tv_quote_for_symbol falló: {e}")
+        return None
+
+
 async def get_tv_chart_state() -> Optional[dict]:
     """Estado del chart activo: símbolo, timeframe, indicadores."""
     try:

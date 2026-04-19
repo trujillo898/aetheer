@@ -361,7 +361,100 @@ class TVCommands:
 
         return {"success": True, "study_count": len(studies), "studies": studies}
 
+    async def get_quote_for_symbol(
+        self,
+        tv_symbol: str,
+        symbol_to_tab: Optional[dict[str, int]] = None,
+    ) -> Optional[dict]:
+        """Quote para un símbolo específico, sin importar qué chart está activo.
+
+        Estrategia:
+        1. Fast path: si el chart activo ya muestra ese símbolo → retorna sin cambios.
+        2. Tab switch: si hay un tab mapeado → switch, lee, restaura.
+        3. Set symbol: cambia el símbolo del chart activo, lee, restaura (1 tab basta).
+
+        Args:
+            tv_symbol: Símbolo TV, e.g. "TVC:DXY", "OANDA:EURUSD"
+            symbol_to_tab: {"TVC:DXY": 0, "OANDA:EURUSD": 1} — opcional
+        """
+        active_symbol = ""
+        try:
+            state = await self.get_chart_state()
+            active_symbol = (state.get("symbol") or "").upper()
+            if active_symbol == tv_symbol.upper():
+                return await self.get_quote()
+        except Exception as e:
+            logger.debug(f"get_quote_for_symbol: get_chart_state falló: {e}")
+
+        # Intentar tab switch si hay mapping — verificar símbolo después del switch
+        if symbol_to_tab:
+            tab_index = None
+            for sym, idx in symbol_to_tab.items():
+                if sym.upper() == tv_symbol.upper():
+                    tab_index = idx
+                    break
+
+            if tab_index is not None:
+                original_tab_index = None
+                for sym, idx in symbol_to_tab.items():
+                    if sym.upper() == active_symbol:
+                        original_tab_index = idx
+                        break
+
+                switched_ok = False
+                try:
+                    await self.tab_switch(tab_index)
+                    # Verificar que el tab realmente muestra el símbolo pedido
+                    post_state = await self.get_chart_state()
+                    post_symbol = (post_state.get("symbol") or "").upper()
+                    if post_symbol == tv_symbol.upper():
+                        switched_ok = True
+                        result = await self.get_quote()
+                        return result
+                except Exception as e:
+                    logger.warning(f"get_quote_for_symbol: tab switch a {tab_index} falló: {e}")
+                finally:
+                    if switched_ok and original_tab_index is not None and original_tab_index != tab_index:
+                        try:
+                            await self.tab_switch(original_tab_index)
+                        except Exception as e:
+                            logger.warning(f"get_quote_for_symbol: restaurar tab {original_tab_index} falló: {e}")
+
+        # Fallback: set_symbol en chart activo, leer, restaurar símbolo original
+        try:
+            await self.set_symbol(tv_symbol)
+            result = await self.get_quote()
+        except Exception as e:
+            logger.warning(f"get_quote_for_symbol: set_symbol({tv_symbol}) falló: {e}")
+            result = None
+        finally:
+            if active_symbol:
+                try:
+                    await self.set_symbol(active_symbol)
+                except Exception as e:
+                    logger.warning(f"get_quote_for_symbol: restaurar símbolo {active_symbol} falló: {e}")
+        return result
+
     # ── NAVEGACIÓN ────────────────────────────────────────────────────────────
+
+    async def set_symbol(self, tv_symbol: str) -> bool:
+        """Cambiar el símbolo del chart activo y esperar a que cargue.
+
+        Args:
+            tv_symbol: Símbolo en formato TradingView, e.g. "TVC:DXY", "OANDA:EURUSD"
+        """
+        async with self._nav_lock:
+            await self.bridge.evaluate(
+                f"""
+                (function() {{
+                    var chart = {_CHART_API};
+                    chart.setSymbol({_js_str(tv_symbol)}, {{}});
+                }})()
+                """
+            )
+            await asyncio.sleep(CHART_LOAD_DELAY)
+            await self._wait_for_chart_ready(timeout=8.0)
+        return True
 
     async def set_timeframe(self, timeframe: str) -> bool:
         """Cambiar timeframe del chart activo y esperar a que cargue (de chart.js setTimeframe).
