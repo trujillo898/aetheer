@@ -140,7 +140,7 @@ IMPLEMENTACIÓN ACTUAL: agregar tradingview-mcp como MCP server,
 IMPLEMENTACIÓN IDEAL: Price Agent con adapter pattern,
   Data Integrity Agent con cross-validation automática,
   Operating Modes dinámicos con transición automática
-ESTADO: implementado
+ESTADO: SUPERSEDIDA por D010 (TV integrado directamente en price-feed Python, Node.js eliminado)
 
 --- D007 ---
 DECISIÓN: Eliminar OANDA API del proyecto
@@ -161,4 +161,55 @@ IMPACTO:
   - Cross-validation pasa a ser TV vs Alpha Vantage (no TV vs OANDA)
 IMPLEMENTACIÓN ACTUAL: limpiar código y configs que referencian OANDA API
 IMPLEMENTACIÓN IDEAL: igual — decisión de alcance, no de arquitectura
+ESTADO: implementado
+--- D010 ---
+DECISIÓN: Integrar TradingView CDP directamente en price-feed (eliminar MCP Node.js)
+FECHA: abril 2026
+CONTEXTO: tradingview-mcp es un repo externo Node.js con 78 tools.
+  Aetheer usa ~10. La dependencia de Node.js es una anomalía en stack 100% Python.
+  quote_get tiene bug confirmado (ignora parámetro symbol — lee siempre el chart activo).
+  No se puede arreglar sin forkear. Tab/TF switching requiere coordinar entre 2 MCPs.
+  La conexión CDP es un WebSocket estándar que Python maneja nativamente con aiohttp.
+  Los JS snippets se ejecutan vía Runtime.evaluate — se extraen del repo original.
+OPCIONES:
+  A) Integrar CDP en Python dentro de price-feed, eliminar MCP Node.js
+     — pros: stack unificado (Python), control total sobre bugs, cascada
+       TV → AV → scraping interna y transparente, deep_read como operación
+       atómica, elimina dependencia de Node.js/npm
+     — contras: ~400-500 líneas de código nuevo, mantener JS snippets
+       cuando TV Desktop se actualice
+  B) Fork del tradingview-mcp como submódulo dentro de Aetheer
+     — pros: menos código nuevo, hereda las 78 tools
+     — contras: sigue siendo Node.js, sigue siendo MCP separado,
+       no resuelve el problema de coordinación entre MCPs
+  C) Mantener tradingview-mcp como dependencia externa
+     — pros: sin trabajo, funciona hoy
+     — contras: Node.js como anomalía, sin control sobre bugs,
+       coordinación entre 2 MCPs, dependencia de maintainer externo
+DECIDIDO: A — integración directa en Python.
+  Se extraen los ~10 JS snippets necesarios del tradingview-mcp (MIT License).
+  Se implementa TVBridge (conexión CDP) y TVCommands (operaciones).
+  price-feed pasa de 6 MCP servers (5 Python + 1 Node.js) a 5 MCP servers Python puro.
+  La cascada TV → Alpha Vantage → scraping es interna a price-feed.
+IMPACTO:
+  - Elimina Node.js del stack (npm, node_modules, versionado separado)
+  - price-feed es el único punto de entrada para TODOS los datos de precio
+  - deep_read (D008) es una función interna, no coordinación entre MCPs
+  - Se puede arreglar quote_get directamente en Python
+  - .mcp.json pasa de 6 servers a 5
+  - Nuevo archivo: mcp-servers/shared/tv_bridge.py (~200 líneas, conexión CDP)
+  - Nuevo archivo: mcp-servers/shared/tv_commands.py (~350 líneas, 10 comandos)
+  - Reescrito: mcp-servers/shared/tv_availability.py (nativo Python, sin subprocess)
+  - Reescrito: mcp-servers/shared/tv_market_reader.py (async, usa TVCommands)
+  - TV MCP original se mantiene instalado en ~/tradingview-mcp como referencia
+RIESGOS:
+  - JS snippets pueden romperse con actualizaciones de TV Desktop
+  - Mitigación: misma que antes (pinear versión TV, monitorear cambios)
+  - Bugs en la implementación CDP propia
+  - Mitigación: tests contra TV Desktop real
+IMPLEMENTACIÓN ACTUAL: tv_bridge.py + tv_commands.py en mcp-servers/shared/,
+  tv_availability.py y tv_market_reader.py reescritos en async nativo,
+  server.py actualizado con 3 tools nuevos (tv_health_check, get_chart_state, get_quote_tv),
+  tradingview eliminado de .mcp.json, aiohttp añadido a requirements.txt
+IMPLEMENTACIÓN IDEAL: igual — esta es la arquitectura correcta para Aetheer
 ESTADO: implementado

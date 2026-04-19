@@ -1,15 +1,15 @@
 AETHEER — ESTADO ACTUAL
 
-Última actualización: 14 abril 2026
+Última actualización: 19 abril 2026
 
 ================================================================================
 FASE ACTUAL
 ================================================================================
 
 Fase 1 (MVP): COMPLETADA — 14 abril 2026
-Fase 2 (Causal Engine + feeds en tiempo real): INICIANDO
+Fase 2 (mejoras de percepción + integridad): EN PROGRESO
 
-Tecnología: Claude Code + subagentes nativos + MCP servers + SQLite + TradingView MCP
+Tecnología: Claude Code + subagentes nativos + MCP servers Python + SQLite
 Nota: esta es la implementación sobre Claude Code. No define al sistema.
 
 ================================================================================
@@ -19,12 +19,14 @@ FASE 1 — IMPLEMENTADO Y FUNCIONANDO
 [x] 6 subagentes en .claude/agents/:
     liquidity, events, price-behavior, macro, context-orchestrator, synthesis
 
-[x] 6 MCP servers:
-    price-feed, economic-calendar, macro-data, news-feed, memory, tradingview
+[x] 5 MCP servers (Python):
+    price-feed, economic-calendar, macro-data, news-feed, memory
 
-[x] TradingView MCP como fuente primaria de datos (D006):
-    Precio, yields, correlaciones, indicadores — todo vía TV Desktop + CDP
-    Cascada: TV MCP → Alpha Vantage → scraping
+[x] TradingView integrado directamente en price-feed (D010):
+    Conexión CDP nativa en Python (tv_bridge.py + tv_commands.py), sin Node.js
+    Cascada interna: TV CDP → Alpha Vantage → scraping
+    Nuevo: tools tv_health_check, get_chart_state, get_quote_tv en price-feed
+    Nuevo: deep_read como operación atómica interna (no coordinación entre MCPs)
 
 [x] Cache TTL en todos los MCP servers
     Precio: 60s, Calendario: 30min, Macro: 15min, News: 10min
@@ -43,41 +45,40 @@ FASE 1 — IMPLEMENTADO Y FUNCIONANDO
 [x] Configuración YAML: sources, decay, context-buffer
 
 [x] Fix alucinación temporal: scripts/now.py + tool get_current_time
-    Detección de sesiones Forex, días en español, estado del mercado
-    Regla obligatoria en los 6 agentes
 
 [x] FRED con cascada de fallback: Yahoo → TradingEconomics → FRED → yields_history
-    Cada lectura exitosa se persiste para fallback futuro
 
-[x] RSS feeds actualizados: CNBC, WSJ, FT, MarketWatch, ForexLive, Fed/ECB press
-    Monitoreo de salud con feed_status y tool get_feed_health
+[x] RSS feeds actualizados con monitoreo de salud
 
-[x] FedWatch con fallback: CME API JSON → scrape HTML → fedwatch_history (máx 7 días)
-    Tool update_fedwatch_manual para input del trader cuando todo falla
+[x] FedWatch con fallback: CME API JSON → scrape → history → manual
 
 [x] Bund/Gilt con fallback a yields_history
 
 [x] OANDA API eliminada del proyecto (D007)
 
+[x] TradingView MCP externo eliminado, reemplazado por CDP nativo (D010)
+
 [x] Quality scores en price-feed (0.98 para TV, degradación por antigüedad)
 
-[x] Análisis completo end-to-end verificado en producción:
-    13 secciones con datos reales, cadenas causales, correlaciones,
-    evaluación de eventos, timing, manipulación, sesiones
+[x] Governor Agent implementado (D007): validación pre-output
+
+[x] Operating Modes formales: FULL/DEGRADED_TRANSIENT/DEGRADED_PERSISTENT/MINIMAL/OFFLINE
+
+[x] JSON Schema para comunicación inter-agente
+
+[x] Análisis completo end-to-end verificado en producción
 
 ================================================================================
 PENDIENTE — FASE 2
 ================================================================================
 
-[x] D008: Lectura multi-símbolo vía tab switching (quote_get solo lee chart activo)
-[x] D008: Lectura multi-timeframe vía chart_set_timeframe (D1, H4, H1, M30, M15, M5)
-[x] D009: Indicador Pine Script "Aetheer Indicator" (tabla consolidada)
-[ ] Data Integrity Agent como gate formal (quality scores continuos, no solo precio)
+[ ] D008: Lectura multi-símbolo vía tab switching (requiere TV Desktop con 3 tabs)
+[ ] D008: Lectura multi-timeframe vía chart_set_timeframe (D1, H4, H1, M15)
+[ ] D009: Indicador Pine Script "Aetheer Indicator" (tabla consolidada)
+[ ] Data Integrity Agent como gate formal (quality scores continuos)
 [ ] Confidence Service transversal (score desglosado por dimensión)
-[x] Governor Agent (validación pre-output, detección de contradicciones)
-[x] Operating Modes formales (FULL/DEGRADED/MINIMAL/OFFLINE)
 [ ] Attention Mechanism (tema dominante del mercado, attention weights)
-[x] Causal Engine formal (SCM con librería, no cadenas de texto)
+[ ] Causal Engine formal (SCM con librería, no cadenas de texto)
 [ ] Regime Detection (risk-on/off, trending/ranging, crisis)
 [ ] Episodic Memory con grafos causales
 [ ] Learning Loop con Reflection Agent
@@ -86,66 +87,56 @@ PENDIENTE — FASE 2
 PROBLEMAS CONOCIDOS
 ================================================================================
 
-- quote_get del TV MCP ignora el parámetro symbol — siempre devuelve datos
-  del chart activo. Workaround: tab switching (D008)
+- get_quote_tv (CDP nativo) lee solo el chart activo.
+  Workaround: tab switching con deep_read (D008, pendiente de pruebas en vivo)
 - ForexFactory calendar scrape retorna 403 (Cloudflare bloquea).
-  Workaround: eventos se cargan vía calendario del sistema o input manual.
+  Workaround: eventos vía input manual del trader.
 - El calendario tiene huecos de datos para algunas semanas.
-  El trader debe verificar externamente eventos de alto impacto.
 
 ================================================================================
 BRECHA CON ARQUITECTURA OBJETIVO
 ================================================================================
 
-Capa arquitectura        | Estado Fase 1                    | Prioridad Fase 2
+Capa arquitectura        | Estado                           | Prioridad
 -------------------------|----------------------------------|------------------
-Orchestrator Agent       | Parcial: synthesis como orquestador básico | ALTA
-Perception Agents        | Implementado: 6 MCP servers      | Mejorar con D008/D009
-Data Integrity Agent     | Parcial: quality scores en precio | ALTA — gate formal
+Orchestrator Agent       | Parcial: synthesis + context-orch | MEDIA
+Perception Agents        | Implementado: 5 MCP servers      | Mejorar con D008/D009
+Data Integrity Agent     | Parcial: quality scores en precio | ALTA
 Interpretation Agents    | Implementado: 3 subagentes       | Mejorar con multi-TF
 Causal Engine            | Texto, no SCM formal             | REQUIERE DISEÑO
 Context Engine           | Parcial: context-orchestrator    | MEDIA
 Confidence Service       | NO EXISTE                        | ALTA
-Governor Agent           | NO EXISTE                        | ALTA
-Simulation Engine        | Parcial: escenarios sin kill conditions | MEDIA
+Governor Agent           | Implementado (D007)              | HECHO
+Simulation Engine        | Parcial: escenarios sin kill cond | MEDIA
 Synthesis Agent          | Implementado: funcional          | Mejorar con Confidence
 Memory System            | SQLite v2, sin Episodic Memory   | REQUIERE DISEÑO
-Learning Loop            | NO EXISTE                        | BAJA (necesita Episodic)
+Learning Loop            | NO EXISTE                        | BAJA
 Attention Mechanism      | NO EXISTE                        | REQUIERE DISEÑO
-Operating Modes          | Kill Switch implícito            | ALTA
+Operating Modes          | Implementado (5 niveles)         | HECHO
 Regime Detection         | NO EXISTE                        | REQUIERE DISEÑO
 Multi-Model              | Todo es Claude                   | FUTURO (Fase 4)
 
 ================================================================================
-PRÓXIMAS PRIORIDADES (FASE 2)
+PRÓXIMAS PRIORIDADES
 ================================================================================
 
 Bloque 1 — Percepción mejorada (D008 + D009):
   Tab switching + multi-timeframe + Pine indicator
-  Impacto: datos multi-escala para todos los agentes
 
 Bloque 2 — Integridad y confianza:
-  Data Integrity Agent + Operating Modes + Confidence Service
-  Impacto: calidad verificable, score desglosado, modos formales
+  Data Integrity Agent formal + Confidence Service
 
-Bloque 3 — Supervisión:
-  Governor Agent + Attention Mechanism
-  Impacto: validación pre-output, procesamiento inteligente
-
-Bloque 4 — Causalidad formal (requiere diseño):
+Bloque 3 — Causalidad formal (requiere diseño):
   Causal Engine (SCM) + Regime Detection + Episodic Memory
-  Impacto: razonamiento causal computacional, no textual
-
-Bloque 5 — Aprendizaje (depende de Bloque 4):
-  Learning Loop + Reflection Agent
-  Impacto: mejora progresiva basada en accuracy histórica
 
 ================================================================================
 NOTAS
 ================================================================================
 
-- Fase 1 validada en producción el 14 de abril de 2026 con análisis completo
-  de mercado real durante sesión de Londres.
-- Todo lo anterior corre sobre Claude Code. No limita decisiones futuras.
-- La migración a otras tecnologías se evalúa caso por caso.
+- Fase 1 validada en producción el 14 de abril de 2026.
+- D010 (19 abril 2026): TradingView integrado nativamente en price-feed Python.
+  Archivos: mcp-servers/shared/tv_bridge.py, mcp-servers/shared/tv_commands.py
+  Eliminado: tradingview MCP externo (Node.js) de .mcp.json
+  Stack ahora es 100% Python (5 MCP servers, sin Node.js).
+- Todo corre sobre Claude Code. No limita decisiones futuras.
 - Actualizar este archivo después de cada implementación significativa.

@@ -1,9 +1,5 @@
 {
   "mcpServers": {
-    "tradingview": {
-      "command": "node",
-      "args": ["/home/thomas/tradingview-mcp/src/server.js"]
-    },
     "price-feed": {
       "command": "/home/thomas/aetheer/.venv/bin/python",
       "args": ["/home/thomas/aetheer/mcp-servers/price-feed/server.py"],

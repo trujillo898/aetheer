@@ -159,19 +159,17 @@ async def get_candles(instrument: str, granularity: str = "H1", count: int = 100
     try:
         from shared.tv_availability import is_tv_available, get_tv_ohlcv
         if is_tv_available():
-            tv_symbol = TV_SYMBOLS.get(instrument)
-            if tv_symbol:
-                data = get_tv_ohlcv(tv_symbol, summary=False)
-                if data:
-                    result = json.dumps({
-                        "instrument": instrument,
-                        "granularity": granularity,
-                        "candles": data,
-                        "source": "tradingview",
-                        "from_cache": False,
-                    }, indent=2)
-                    cache.set(cache_key, result, ttl_seconds=TV_CACHE_TTLS["tv_ohlcv"])
-                    return result
+            data = await get_tv_ohlcv(summary=False)
+            if data:
+                result = json.dumps({
+                    "instrument": instrument,
+                    "granularity": granularity,
+                    "candles": data,
+                    "source": "tradingview",
+                    "from_cache": False,
+                }, indent=2)
+                cache.set(cache_key, result, ttl_seconds=TV_CACHE_TTLS["tv_ohlcv"])
+                return result
     except Exception as e:
         logger.warning(f"TV candles failed for {instrument}: {e}")
 
@@ -251,17 +249,15 @@ async def get_ohlcv_for_analysis(instrument: str, summary: bool = False) -> str:
     try:
         from shared.tv_availability import is_tv_available, get_tv_ohlcv
         if is_tv_available():
-            tv_symbol = TV_SYMBOLS.get(instrument)
-            if tv_symbol:
-                data = get_tv_ohlcv(tv_symbol, summary=summary)
-                if data:
-                    result = json.dumps({
-                        "instrument": instrument,
-                        "source": "tradingview",
-                        "data": data,
-                    }, indent=2)
-                    cache.set(cache_key, result, ttl_seconds=ttl)
-                    return result
+            data = await get_tv_ohlcv(summary=summary)
+            if data:
+                result = json.dumps({
+                    "instrument": instrument,
+                    "source": "tradingview",
+                    "data": data,
+                }, indent=2)
+                cache.set(cache_key, result, ttl_seconds=ttl)
+                return result
     except Exception as e:
         logger.warning(f"TV OHLCV failed for {instrument}: {e}")
 
@@ -304,7 +300,7 @@ async def get_chart_indicators() -> str:
                 "available": False,
                 "error": "TradingView not connected. Start TV with --remote-debugging-port=9222.",
             })
-        values = get_tv_study_values()
+        values = await get_tv_study_values()
         if values:
             return json.dumps({
                 "available": True,
@@ -335,7 +331,7 @@ async def capture_chart_screenshot() -> str:
                 "available": False,
                 "error": "TradingView not connected.",
             })
-        screenshot = get_tv_screenshot()
+        screenshot = await get_tv_screenshot()
         if screenshot:
             return json.dumps({
                 "available": True,
@@ -375,7 +371,76 @@ async def read_market_data_tool(
         specific_pair: For validate_setup/sudden_move, which pair (e.g. "EURUSD").
     """
     from shared.tv_market_reader import read_market_data
-    return read_market_data(intention, specific_pair)
+    return await read_market_data(intention, specific_pair)
+
+
+@mcp.tool()
+async def tv_health_check() -> str:
+    """Check TradingView Desktop CDP connection status.
+
+    Returns JSON with connection status, active symbol, resolution, and API availability.
+    Does not modify the chart in any way.
+    """
+    from shared.tv_availability import is_tv_available, get_tv_commands
+    if not is_tv_available():
+        return json.dumps({
+            "connected": False,
+            "source": "tv_cdp",
+            "error": "TradingView not responding on port 9222.",
+            "suggestion": "Start TradingView Desktop with --remote-debugging-port=9222",
+        })
+    tv = await get_tv_commands()
+    if tv is None:
+        return json.dumps({"connected": False, "error": "CDP connect failed"})
+    result = await tv.health_check()
+    result["source"] = "tv_cdp"
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def get_chart_state() -> str:
+    """Get current state of the active TradingView chart.
+
+    Returns symbol, timeframe (resolution), chart type, and list of loaded indicators.
+    Only works when TradingView is connected.
+    """
+    from shared.tv_availability import is_tv_available, get_tv_commands
+    if not is_tv_available():
+        return json.dumps({"available": False, "error": "TradingView not connected."})
+    try:
+        tv = await get_tv_commands()
+        if tv is None:
+            return json.dumps({"available": False, "error": "CDP connect failed"})
+        state = await tv.get_chart_state()
+        return json.dumps({"available": True, "source": "tv_cdp", **state}, indent=2)
+    except Exception as e:
+        logger.error(f"get_chart_state failed: {e}")
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def get_quote_tv() -> str:
+    """Get real-time quote directly from the active TradingView chart via CDP.
+
+    Reads the last bar from the active chart (symbol, OHLC, volume, time).
+    Faster than get_price() — no HTTP cascade, direct memory read.
+    Only works when TradingView is connected.
+    """
+    from shared.tv_availability import is_tv_available, get_tv_quote
+    if not is_tv_available():
+        return json.dumps({"available": False, "error": "TradingView not connected."})
+    try:
+        quote = await get_tv_quote()
+        if quote:
+            return json.dumps({
+                "available": True,
+                "source": "tv_cdp",
+                **quote,
+            }, indent=2)
+        return json.dumps({"available": True, "error": "Could not read quote from active chart."})
+    except Exception as e:
+        logger.error(f"get_quote_tv failed: {e}")
+        return json.dumps({"error": str(e)})
 
 
 if __name__ == "__main__":

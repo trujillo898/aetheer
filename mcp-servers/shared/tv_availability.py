@@ -1,39 +1,46 @@
 """
-Detector de disponibilidad de TradingView MCP.
-Usado por price-feed para decidir si TV es fuente primaria de datos.
+tv_availability.py — Disponibilidad y acceso a TradingView Desktop.
 
-CLI interface (tradingview-mcp):
-  node cli status              → health check (JSON con success: true/false)
-  node cli symbol <SYM>        → cambia símbolo activo del gráfico, espera a que cargue
-  node cli quote               → quote del gráfico activo (close, last, bid?, ask?, time?)
-  node cli ohlcv [--summary]   → barras OHLCV del gráfico activo
-  node cli values              → valores de indicadores del gráfico activo
-  node cli screenshot -r chart → screenshot del gráfico activo
+Reemplaza la implementación anterior basada en subprocess Node.js.
+Ahora usa TVBridge (CDP Python nativo) directamente.
 
-Limitación MVP: get_tv_quote y get_tv_ohlcv cambian el símbolo activo del gráfico
-del trader antes de leer datos. Alternativa ideal: multi-pane con símbolos fijos +
-leer por pane sin cambiar el gráfico.
+API pública:
+  is_tv_available()       → bool  (sync, HTTP check, cacheado 30s)
+  get_tv_commands()       → async, singleton de TVCommands
+  get_tv_quote()          → async
+  get_tv_ohlcv()          → async
+  get_tv_study_values()   → async
+  get_tv_screenshot()     → async (no implementado en CDP puro, retorna None)
 """
 
-import json
-import subprocess
+import asyncio
+import logging
 import time
-from pathlib import Path
+from typing import Optional
 
-_TV_CLI = Path.home() / "tradingview-mcp" / "src" / "cli" / "index.js"
+import httpx
 
-# Cache de estado — evita health check en cada consulta
-_tv_status: dict = {"available": False, "last_check": 0.0, "ttl": 30}
+from .tv_bridge import TVBridge
+from .tv_commands import TVCommands
+
+logger = logging.getLogger("aetheer.tv_availability")
+
+CDP_PORT = 9222
+CDP_HOST = "localhost"
+
+# ── DISPONIBILIDAD SYNC (HTTP check) ──────────────────────────────────────────
+
+_tv_status: dict = {"available": False, "last_check": 0.0, "ttl": 30.0}
 
 
 def is_tv_available(force_check: bool = False) -> bool:
-    """Verifica si TradingView MCP está disponible vía CDP.
+    """Verificar si TradingView Desktop está corriendo con CDP habilitado.
 
+    Usa HTTP GET a localhost:9222/json/list — no requiere WebSocket.
     Cachea el resultado 30 segundos para minimizar overhead.
-    Si tradingview-mcp no está instalado en ~/tradingview-mcp, retorna False.
 
     Returns:
-        True si TV Desktop está corriendo con --remote-debugging-port=9222.
+        True si TradingView Desktop responde en puerto 9222.
     """
     now = time.time()
     if not force_check and (now - _tv_status["last_check"]) < _tv_status["ttl"]:
@@ -41,22 +48,17 @@ def is_tv_available(force_check: bool = False) -> bool:
 
     available = False
     try:
-        if not _TV_CLI.exists():
-            # tradingview-mcp no instalado — fallo silencioso, no es un error
-            _tv_status["available"] = False
-            _tv_status["last_check"] = now
-            return False
-
-        result = subprocess.run(
-            ["node", str(_TV_CLI), "status"],
-            capture_output=True,
-            text=True,
-            timeout=5,
+        resp = httpx.get(
+            f"http://{CDP_HOST}:{CDP_PORT}/json/list",
+            timeout=2.0,
         )
-        if result.returncode == 0 and result.stdout.strip():
-            data = json.loads(result.stdout)
-            available = data.get("success") is True and data.get("cdp_connected") is True
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError, Exception):
+        targets = resp.json()
+        available = any(
+            t.get("type") == "page"
+            and "tradingview" in t.get("url", "").lower()
+            for t in targets
+        )
+    except Exception:
         available = False
 
     _tv_status["available"] = available
@@ -64,125 +66,119 @@ def is_tv_available(force_check: bool = False) -> bool:
     return available
 
 
-def get_tv_quote(symbol: str) -> dict | None:
-    """Obtiene quote del gráfico de TradingView.
+# ── SINGLETON TVCommands ───────────────────────────────────────────────────────
 
-    Cambia el símbolo activo del gráfico (setSymbol + waitForChartReady),
-    luego lee el último bar y datos de precio.
+_tv_bridge: Optional[TVBridge] = None
+_tv_commands: Optional[TVCommands] = None
+_tv_lock: Optional[asyncio.Lock] = None
 
-    Args:
-        symbol: Símbolo en formato TV con exchange (e.g. "TVC:DXY", "OANDA:EURUSD").
 
-    Returns:
-        Dict con { success, symbol, close, last, volume, bid?, ask?, time?, ... }
-        o None si falla.
+def _get_lock() -> asyncio.Lock:
+    """Lazy-init del lock (debe llamarse desde contexto async)."""
+    global _tv_lock
+    if _tv_lock is None:
+        _tv_lock = asyncio.Lock()
+    return _tv_lock
+
+
+async def get_tv_commands() -> Optional[TVCommands]:
+    """Obtener (o crear) la instancia singleton de TVCommands.
+
+    Reconecta automáticamente si la conexión se perdió.
+    Retorna None si TradingView no está disponible.
     """
-    try:
-        # setSymbol espera a que el gráfico termine de cargar (waitForChartReady)
-        sym_result = subprocess.run(
-            ["node", str(_TV_CLI), "symbol", symbol],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        # Retorno de `symbol` es { success, symbol, resolution } — no es el quote
-        if sym_result.returncode != 0:
+    global _tv_bridge, _tv_commands
+
+    lock = _get_lock()
+    async with lock:
+        # Verificar disponibilidad HTTP primero (barato)
+        if not is_tv_available():
             return None
 
-        # Leer quote del gráfico activo (ya cargado con el símbolo correcto)
-        q_result = subprocess.run(
-            ["node", str(_TV_CLI), "quote"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if q_result.returncode == 0 and q_result.stdout.strip():
-            data = json.loads(q_result.stdout)
-            if data.get("success") and (data.get("close") or data.get("last")):
-                return data
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError, Exception):
-        pass
-    return None
+        # Si ya tenemos una conexión válida, retornarla
+        if _tv_commands is not None and _tv_bridge is not None and _tv_bridge.connected:
+            return _tv_commands
+
+        # Crear o reconectar
+        _tv_bridge = TVBridge()
+        if await _tv_bridge.connect():
+            _tv_commands = TVCommands(_tv_bridge)
+            return _tv_commands
+
+        logger.warning("TVBridge: no se pudo conectar a TradingView Desktop")
+        return None
 
 
-def get_tv_ohlcv(symbol: str, summary: bool = True) -> dict | None:
-    """Obtiene datos OHLCV del gráfico de TradingView.
+# ── FUNCIONES DE ACCESO ASYNC ─────────────────────────────────────────────────
 
-    Cambia el símbolo activo, luego lee las barras históricas del gráfico.
+async def get_tv_quote() -> Optional[dict]:
+    """Quote del chart activo de TradingView.
+
+    Returns dict con {success, symbol, close, last, time, volume, ...} o None si falla.
+    """
+    try:
+        tv = await get_tv_commands()
+        if tv is None:
+            return None
+        return await tv.get_quote()
+    except Exception as e:
+        logger.debug(f"get_tv_quote falló: {e}")
+        return None
+
+
+async def get_tv_ohlcv(summary: bool = True) -> Optional[dict]:
+    """OHLCV del chart activo de TradingView.
 
     Args:
-        symbol: Símbolo en formato TV con exchange (e.g. "TVC:DXY").
-        summary: True → stats compactos (high/low/open/close/range/change_pct).
-                 False → todas las barras (~100 barras).
+        summary: True → stats compactos. False → todas las barras (~100).
 
-    Returns:
-        Dict con datos OHLCV o None si falla.
+    Returns dict con OHLCV data o None si falla.
+
+    NOTA: No acepta parámetro symbol — lee siempre el chart activo.
+    Para multi-símbolo usar TVCommands.deep_read() vía read_market_data_tool.
     """
     try:
-        # Navegar al símbolo
-        sym_result = subprocess.run(
-            ["node", str(_TV_CLI), "symbol", symbol],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if sym_result.returncode != 0:
+        tv = await get_tv_commands()
+        if tv is None:
             return None
-
-        # Leer OHLCV del gráfico activo
-        args = ["node", str(_TV_CLI), "ohlcv"]
-        if summary:
-            args.append("--summary")
-        ohlcv_result = subprocess.run(args, capture_output=True, text=True, timeout=15)
-        if ohlcv_result.returncode == 0 and ohlcv_result.stdout.strip():
-            data = json.loads(ohlcv_result.stdout)
-            if data.get("success"):
-                return data
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError, Exception):
-        pass
-    return None
+        return await tv.get_ohlcv(summary=summary)
+    except Exception as e:
+        logger.debug(f"get_tv_ohlcv falló: {e}")
+        return None
 
 
-def get_tv_study_values() -> dict | None:
-    """Lee valores actuales de indicadores del gráfico activo.
+async def get_tv_study_values() -> Optional[dict]:
+    """Valores de indicadores nativos del chart activo.
 
-    No cambia el símbolo — lee los estudios visibles en el gráfico actual.
-    Retorna ATR, RSI, MACD y cualquier otro indicador con plot().
-
-    Returns:
-        Dict con { success, study_count, studies: [{name, values}] } o None si falla.
+    Returns dict con {success, study_count, studies} o None si falla.
     """
     try:
-        result = subprocess.run(
-            ["node", str(_TV_CLI), "values"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            data = json.loads(result.stdout)
-            if data.get("success"):
-                return data
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError, Exception):
-        pass
-    return None
+        tv = await get_tv_commands()
+        if tv is None:
+            return None
+        return await tv.get_study_values()
+    except Exception as e:
+        logger.debug(f"get_tv_study_values falló: {e}")
+        return None
 
 
-def get_tv_screenshot() -> str | None:
-    """Captura screenshot del gráfico activo.
+async def get_tv_screenshot() -> Optional[str]:
+    """Screenshot del chart activo.
 
-    Returns:
-        Ruta del archivo screenshot o base64 string, o None si falla.
+    No implementado en CDP puro (requería CLI Node.js).
+    Retorna None silenciosamente para mantener compatibilidad.
     """
-    try:
-        result = subprocess.run(
-            ["node", str(_TV_CLI), "screenshot", "--region", "chart"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
-        pass
+    logger.debug("get_tv_screenshot: no implementado en CDP nativo")
     return None
+
+
+async def get_tv_chart_state() -> Optional[dict]:
+    """Estado del chart activo: símbolo, timeframe, indicadores."""
+    try:
+        tv = await get_tv_commands()
+        if tv is None:
+            return None
+        return await tv.get_chart_state()
+    except Exception as e:
+        logger.debug(f"get_tv_chart_state falló: {e}")
+        return None
