@@ -40,7 +40,7 @@ sqlite3 db/aetheer.db "INSERT OR IGNORE INTO user_profile (id) VALUES (1);"
 
 # Verificar MCP servers
 echo "[BOOT] Verificando MCP servers..."
-for server in price-feed economic-calendar macro-data news-feed memory; do
+for server in tv-unified macro-data memory; do
     if [ -f "mcp-servers/$server/server.py" ]; then
         echo "  [OK] $server"
     else
@@ -61,7 +61,7 @@ done
 
 # Verificar módulos nuevos
 echo "[BOOT] Verificando módulos..."
-for module in mcp-servers/shared/cache.py mcp-servers/shared/tv_availability.py mcp-servers/price-feed/alpha_vantage.py; do
+for module in mcp-servers/shared/tv_availability.py mcp-servers/tv-unified/server.py mcp-servers/tv-unified/sources/prices.py; do
     if [ -f "$module" ]; then
         echo "  [OK] $module"
     else

@@ -1,5 +1,6 @@
 # AETHEER — Sistema de Inteligencia de Mercado para Forex
-> Versión: 2.0 | Última actualización: 2026-04-19 | Schema: D001-D017
+> Versión: 2.0 | Última actualización: 2026-04-19 | Schema: D001-D015
+> Fuente de verdad de decisiones: `Essence/06_DECISIONES.txt`
 
 ---
 
@@ -72,23 +73,24 @@ graph LR
 
 | Agente | Responsabilidad | Output Clave | D-Ref |
 |--------|----------------|--------------|-------|
-| `liquidity` | Volatilidad intradía, ventanas óptimas | `liquidity_level`, `optimal_windows_utc` | D009 |
-| `events` | Calendario económico, reacción post-dato | `event_risk_next_24h`, `priced_in` | D007 |
-| `price-behavior` | Estructura de precio, patrones, rupturas | `causal_chains`, `breakout_probability` | D009 |
-| `macro` | Política monetaria, yields, geopolítica | `macro_bias`, `rate_differentials` | D007 |
-| `context-orchestrator` | Gestión de contexto, pruning, routing | `packages`, `operating_mode`, `budget_tokens` | D006 |
-| `synthesis` | Integración final, respuesta al usuario | Texto en lenguaje natural, 1000-1400 palabras | D003 |
-| `governor` | Validación de calidad, aprobación final | `approved`, `quality_score_global`, `causal_skeleton` | D007 |
+| `liquidity` | Volatilidad intradía, ventanas óptimas | `liquidity_level`, `optimal_windows_utc` | D014, D015 |
+| `events` | Calendario económico, reacción post-dato | `event_risk_next_24h`, `priced_in` | D012, D013 |
+| `price-behavior` | Estructura de precio, patrones, rupturas | `causal_chains`, `breakout_probability` | D012, D015 |
+| `macro` | Política monetaria, yields, geopolítica | `macro_bias`, `rate_differentials` | D012 |
+| `context-orchestrator` | Gestión de contexto, pruning, routing | `packages`, `operating_mode`, `budget_tokens` | D011, D014 |
+| `synthesis` | Integración final, respuesta al usuario | Texto en lenguaje natural, 1000-1400 palabras | D011, D012 |
+| `governor` | Validación de calidad, aprobación final | `approved`, `quality_score_global`, `causal_skeleton` | D011, D012 |
 
 ---
 
 ## Reglas Absolutas (No negociables)
 
-### KILL SWITCH — DXY Data Integrity
+### KILL SWITCH — TradingView Single Source Integrity (D013)
 ```python
 # Antes de CUALQUIER análisis:
-if dxy_price_unavailable OR dxy_age_hours > 4:
-    return "Error de conexión en vivo. Ingresa el precio actual del DXY para continuar."
+health = await tv_unified.get_system_health()
+if health.operating_mode == "OFFLINE":
+    return "Error: TradingView offline. No es posible generar análisis."
     # NO invocar otros agentes
     # NO generar análisis parcial
     # Loguear incidente en memory
@@ -122,9 +124,9 @@ NUNCA emitir:
 
 SIEMPRE incluir:
   - Fuente + timestamp para cada precio: "DXY: 104.82 (TradingView, 14:30 UTC)"
-  - Banner de Operating Mode si != FULL
+  - Banner de Operating Mode si == OFFLINE (no análisis, solo error)
   - quality_score_global en footer del análisis
-  - Nota explícita si dato es fallback: "(Alpha Vantage, hace 2h)"
+  - Nota explícita si un dato vino de cache stale: "(cache 22 min)"
 ```
 
 ### Comunicación Inter-Agente
@@ -134,7 +136,7 @@ Ejemplo mínimo:
 {
   "agent": "price_behavior",
   "agent_version": "1.1.0",
-  "execution_meta": {"operating_mode": "FULL", "data_quality": "high"},
+  "execution_meta": {"operating_mode": "ONLINE", "data_quality": "high"},
   "timestamp": "ISO8601"
 }
 
@@ -146,28 +148,33 @@ Validación:
 
 ---
 
-## Operating Modes (D006)
+## Operating Modes (D011 — binario; supersede del modelo original de 5 estados)
 
 | Modo | Condiciones | Implicaciones | Budget Máx |
 |------|------------|---------------|------------|
-| **FULL** | quality_score >= 0.90, todos los datos <2h, sin contradicciones críticas | Análisis completo, causal_chains habilitados | 6144 tokens |
-| **DEGRADED_TRANSIENT** | quality_score [0.75-0.90) o algún dato 2-4h | Análisis con advertencias, fallbacks marcados | 4096 tokens |
-| **DEGRADED_PERSISTENT** | quality_score [0.60-0.75) o múltiples fuentes degradadas | Solo análisis estructural básico, sin macro profundo | 2048 tokens |
-| **MINIMAL** | quality_score [0.60-0.75) con datos limitados | Solo precio + liquidez, sin cadenas causales | 2048 tokens |
-| **OFFLINE** | quality_score < 0.60 OR DXY >4h OR price-feed down | Kill Switch activado, solo error estructurado | 0 tokens |
+| **ONLINE** | tv-unified.get_system_health → ONLINE (CDP o APIs OK, o cache <30min) AND quality_score >= 0.60 | Análisis completo. Datos stale dentro de 30min se sirven con marca "(cache N min)". | 6144 tokens |
+| **OFFLINE** | tv-unified OFFLINE (todos los canales caídos Y cache > 30min) OR quality_score < 0.60 OR orchestrator timeout | Kill Switch activado, solo error estructurado. `approved = false`. | 0 tokens |
 
 ### Transiciones Automáticas
 ```python
-# Ejemplo: FULL → DEGRADED_TRANSIENT
-if any(data_source.age_hours > 2 for data_source in critical_sources):
-    operating_mode = "DEGRADED_TRANSIENT"
-    # synthesis debe marcar datos con fallback explícitamente
+# Fuente única de verdad: tv-unified.get_system_health
+health = await tv_unified.get_system_health()
+# health.operating_mode ∈ {"ONLINE", "OFFLINE"}
 
-# Ejemplo: cualquier modo → OFFLINE
-if dxy_age_hours > 4 or quality_score_global < 0.60:
+if health.operating_mode == "OFFLINE" or quality_score_global < 0.60:
     operating_mode = "OFFLINE"
-    approved = false  # governor bloquea análisis
+    approved = False
+else:
+    operating_mode = "ONLINE"
+    # Datos stale: si algún paquete incluye meta.stale == True,
+    # synthesis debe marcar "(cache N min)" pero NO baja el modo.
 ```
+
+Nota: **El modelo de 5 estados (FULL / DEGRADED_TRANSIENT / DEGRADED_PERSISTENT /
+MINIMAL / OFFLINE) está SUPERSEDED por D011**. El modelo binario elimina la
+complejidad de estados intermedios que añadían validación sin ganancia operativa:
+cada transición DEGRADED_* requería su propio banner, budget, y ruta de código sin
+que el usuario notara una diferencia real vs una advertencia en línea.
 
 ---
 
@@ -247,12 +254,23 @@ Cadena causal: NFP +36K vs consenso → yields US10Y +7bps → DXY +0.42% en 15m
 
 ## MCP Servers — Integración y Fallbacks
 
-### price-feed (Prioridad 0: TradingView)
+### tv-unified (ÚNICA fuente de verdad — D013)
 ```yaml
 disponibilidad:
-  - Detectar automáticamente: TradingView Desktop con --remote-debugging-port=9222
-  - Cache de estado: 30 segundos (evitar polling excesivo)
-  - Fallback transparente: si TV se desconecta → cascada sin mencionar al usuario
+  - TradingView Desktop con --remote-debugging-port=9222 (canal primario CDP)
+  - news-headlines.tradingview.com  (API JSON pública, sin cookies)
+  - economic-calendar.tradingview.com (API JSON, requiere Origin + Referer headers)
+  - Cache SQLite local (db/tv_cache.sqlite) con ventana stale de 30 min
+  - NO hay cascada a Alpha Vantage / FRED / Yahoo / Investing — eliminados en D013.
+
+tools_expuestos:
+  - get_price_tool(instrument)           → precio spot (tab switch transparente)
+  - get_ohlcv_tool(instrument, tf)       → OHLCV + Aetheer indicator (deep read)
+  - get_correlations_tool()              → basket DXY/EURUSD/GBPUSD/XAUUSD/VIX/SPX/US10Y/US02Y
+  - get_chart_indicators_tool(inst, tf)  → solo bloque Aetheer
+  - get_news_tool(symbol|category, lang, limit)
+  - get_economic_calendar_tool(countries, from, to)
+  - get_system_health                    → HealthReport {ONLINE|OFFLINE}
 
 símbolos_tv:
   DXY: "TVC:DXY"
@@ -264,33 +282,28 @@ símbolos_tv:
   US10Y: "TVC:US10Y"
   US02Y: "TVC:US02Y"
   USOIL: "TVC:USOIL"
-  DE10Y: "TVC:DE10Y"  # "last known" en feriados europeos
+  DE10Y: "TVC:DE10Y"
   GB10Y: "TVC:GB10Y"
 
 calidad:
-  quality_score: 0.98
-  divergence_threshold_pct: 0.15  # ±1-3 pips entre fuentes es normal
+  quality_score: 0.98 (live CDP) | 0.95 (news/calendar API) | decae linealmente en cache stale
+  stale_window_seconds: 1800  # 30 min — mantiene análisis servible durante desconexiones breves
 ```
 
-### Cascada de Fuentes (automática, sin acción del usuario)
+### Política de servicio (D013)
 ```python
-def get_price(symbol: str) -> PriceData:
-    sources = [
-        ("tradingview", 0.98, check_tv_available),
-        ("alpha_vantage", 0.85, check_api_key),  # Solo EURUSD/GBPUSD
-        ("tradingeconomics", 0.70, scrape_with_timeout),
-        ("investing", 0.65, scrape_with_timeout),
-        ("yahoo_finance", 0.60, scrape_with_timeout),  # DXY: "DX-Y.NYB"
-    ]
-    
-    for source_name, quality, availability_check in sources:
-        if availability_check() and data := fetch_from_source(source_name, symbol):
-            return enrich_with_metadata(data, source_name, quality)
-    
-    return None  # Kill Switch se activará aguas arriba
+async def any_tv_tool(...):
+    # 1) Cache fresco (TTL ok) → servir directamente.
+    # 2) Cache miss → llamar TV (CDP o HTTP).
+    # 3) TV falla → servir cache stale si age < 30min con meta.stale=True.
+    # 4) Sin cache y TV caído → raise (propaga a OFFLINE global).
 ```
 
-### Lectura Multi-Timeframe (D008)
+Aceptación de riesgos (D013): single-vendor dependency sobre APIs no documentadas.
+El tv-health-monitor (scripts/tv-health-monitor.py) vigila salud y — opcionalmente —
+relanza TV Desktop (ver AETHEER_AUTORESTART / AETHEER_TV_LAUNCH_CMD).
+
+### Lectura Multi-Timeframe (D014)
 ```yaml
 modos:
   lectura_rapida:
@@ -319,7 +332,7 @@ profundidad_por_intención:
 
 ---
 
-## Indicador Aetheer (D009)
+## Indicador Aetheer (D015)
 
 ### Especificación Técnica
 ```pine
@@ -436,7 +449,7 @@ CREATE TABLE agent_outputs (
     output_json TEXT NOT NULL,
     query_intent TEXT,
     output_hash TEXT,               -- sha256 del JSON (migration 003)
-    operating_mode TEXT DEFAULT 'UNKNOWN',  -- 'FULL'|'DEGRADED_TRANSIENT'|etc. (migration 003)
+    operating_mode TEXT DEFAULT 'UNKNOWN',  -- 'ONLINE'|'OFFLINE' (D011; valores legacy pueden persistir en filas antiguas)
     quality_score REAL,             -- (migration 003)
     created_at TEXT DEFAULT (datetime('now'))
 );
@@ -469,7 +482,7 @@ time_decay:
   user_preference:
     factor: 0.995/day   # Vida útil: ~365 días
   causal_chain_validated:
-    factor: 0.92/day    # Vida útil: ~14 días (D007)
+    factor: 0.92/day    # Vida útil: ~14 días (D012)
 
 ejecución:
   frecuencia: "hourly"
@@ -486,7 +499,7 @@ eliminación:
 
 ---
 
-## Validación y Calidad (D005, D007)
+## Validación y Calidad (D005, D012)
 
 ### Schema Validation (Pydantic + JSON Schema)
 ```python
@@ -519,7 +532,7 @@ except ValidationError as e:
         return {"error": "VALIDATION_FAILED", "details": str(e)}
 ```
 
-### Quality Score Calculation (governor - D007)
+### Quality Score Calculation (governor - D012)
 ```python
 def calculate_quality_score(agent_responses: dict, dxy_data: dict) -> float:
     """
@@ -534,7 +547,7 @@ def calculate_quality_score(agent_responses: dict, dxy_data: dict) -> float:
     # Retorna score redondeado a 2 decimales
 ```
 
-### Contradiction Detection (D007)
+### Contradiction Detection (D012)
 ```python
 def detect_contradictions(agent_responses: dict) -> List[Contradiction]:
     """
@@ -556,14 +569,16 @@ def detect_contradictions(agent_responses: dict) -> List[Contradiction]:
 metrics:
   calidad:
     - governor.quality_score_global (time series)
-    - governor.operating_mode (state changes)
-    - price-feed.source_fallback_count (por fuente)
-  
+    - governor.operating_mode (state changes — binario)
+    - tv-unified.cache_hit_ratio
+    - tv-unified.stale_cache_served_count
+
   rendimiento:
     - context-orchestrator.processing_duration_ms
     - synthesis.response_latency_ms
     - memory.decay_items_removed_per_hour
-  
+    - tv-unified.cdp_roundtrip_ms
+
   consistencia:
     - context-orchestrator.fragmentation_score
     - governor.contradictions_detected_count
@@ -573,29 +588,22 @@ alertas:
   - quality_score_global < 0.70 por 3 ejecuciones consecutivas → warning
   - operating_mode = OFFLINE → critical
   - memory.write_failures > 5/hour → warning
-  - price-feed.fallback_chain_activated > 10/hour → warning
+  - tv-unified.stale_cache_served_count > 20/hour → warning
+  - tv-unified CDP down > 5 min → critical (handled por tv-health-monitor)
 ```
 
-### Health Check Endpoint
+### Health Check (vía tv-unified MCP)
 ```python
-# GET /health
+# Llamada directa: mcp__tv-unified__get_system_health
 {
-  "status": "ok | degraded | down",
-  "components": {
-    "price-feed": {"status": "ok", "source": "tradingview", "last_update": "ISO8601"},
-    "memory": {"status": "ok", "size_mb": 42.3, "decay_last_run": "ISO8601"},
-    "agents": {
-      "liquidity": "ok",
-      "events": "ok", 
-      "price-behavior": "ok",
-      "macro": "degraded",  # ej: macro-data timeout
-      "governor": "ok",
-      "synthesis": "ok"
-    }
-  },
-  "operating_mode": "DEGRADED_TRANSIENT",
-  "quality_score_global": 0.82,
-  "timestamp": "ISO8601"
+  "status": "online | offline",
+  "cdp_connected": true,
+  "news_api_ok": true,
+  "calendar_api_ok": true,
+  "operating_mode": "ONLINE",
+  "cache_fallback_available": true,
+  "errors": {},
+  "timestamp": 1729353600
 }
 ```
 
@@ -611,36 +619,32 @@ test_suite:
       setup: {mock_dxy_age_hours: 4.1}
       expected: {operating_mode: "OFFLINE", response: "Error de conexión..."}
     
-    - name: "dxy_unavailable"
-      setup: {mock_price_feed_down: true}
+    - name: "tv_fully_unavailable"
+      setup: {mock_tv_unified_offline: true, cache_empty: true}
       expected: {approved: false, rejection_reason: "KILL_SWITCH..."}
-  
+
   operating_mode_transitions:
-    - name: "full_to_degraded_on_data_age"
-      setup: {quality_score: 0.85, dxy_age: 2.5}
-      expected: {operating_mode: "DEGRADED_TRANSIENT", banner_present: true}
-    
-    - name: "degraded_to_offline_on_quality_drop"
+    - name: "online_persists_with_stale_cache"
+      setup: {tv_down: true, cache_age_seconds: 600}
+      expected: {operating_mode: "ONLINE", stale_marked: true, approved: true}
+
+    - name: "online_to_offline_on_quality_drop"
       setup: {quality_score: 0.58}
       expected: {operating_mode: "OFFLINE", approved: false}
-  
+
   contradiction_handling:
     - name: "bias_mismatch_medium_severity"
       setup: {pb_bias: "bullish", macro_bias: "neutral"}
       expected: {contradictions_detected: 1, synthesis_exposes: true}
-    
+
     - name: "high_severity_multiple"
       setup: {contradictions: [{severity: "high"}, {severity: "high"}]}
       expected: {approved: false, rejection_reason: "Múltiples contradicciones..."}
-  
-  fallback_transparency:
-    - name: "tv_to_alpha_vantage_fallback"
-      setup: {mock_tv_down: true, symbol: "EURUSD"}
-      expected: {source: "alpha_vantage", marked_as_fallback: true, user_not_notified_of_tv}
-    
-    - name: "dxy_scraping_fallback"
-      setup: {mock_tv_down: true, symbol: "DXY"}
-      expected: {source: "yahoo_finance" or "tradingeconomics", age_marked_if_old: true}
+
+  cache_stale_transparency:
+    - name: "tv_cdp_flicker_served_from_cache"
+      setup: {mock_cdp_flicker: true, cache_age_seconds: 900}
+      expected: {source: "tradingview_cdp_stale", meta.stale: true, synthesis_marks: "(cache 15 min)"}
 ```
 
 ### Ejecución de Tests
@@ -659,17 +663,23 @@ python -m pytest tests/ -v -k "fallback" --mock-sources=degraded
 
 ## Documentación de Decisiones (DXXX)
 
-| ID | Título | Estado | Enlace |
-|----|--------|--------|--------|
-| D001 | Regla temporal: prohibición de cálculo mental | ✅ Implementado | `docs/decisions/D001-temporal-rule.md` |
-| D003 | Experiencia de usuario: estilo de síntesis | ✅ Implementado | `docs/decisions/D003-synthesis-style.md` |
-| D005 | Validación de schemas inter-agente | ✅ Implementado | `docs/decisions/D005-schema-validation.md` |
-| D006 | Operating Modes y gestión de degradación | ✅ Implementado | `docs/decisions/D006-operating-modes.md` |
-| D007 | Cadenas causales y calidad de decisión | ✅ Implementado | `docs/decisions/D007-causal-chains.md` |
-| D008 | Lectura multi-timeframe y interferencia | ✅ Implementado | `docs/decisions/D008-multi-tf-reading.md` |
-| D009 | Indicador Aetheer: especificación de datos | ✅ Implementado | `docs/decisions/D009-aetheer-indicator.md` |
-| D010 | Versionado de agentes y compatibilidad | 🔄 En progreso | `docs/decisions/D010-agent-versioning.md` |
-| D011 | Protocolo de handoff Orchestrator ↔ Governor | 📋 Pendiente | `docs/decisions/D011-handoff-protocol.md` |
+Fuente autoritativa: **`Essence/06_DECISIONES.txt`**. Tabla resumen:
+
+| ID | Título | Estado |
+|----|--------|--------|
+| D001 | Implementación inicial sobre Claude Code | ✅ Implementado |
+| D002 | OANDA como fuente primaria de precio | ⛔ SUPERSEDIDA por D006 + D007 |
+| D003 | Cache TTL en MCP servers | ✅ Implementado |
+| D004 | Fix alucinación temporal (scripts/now.py) | ✅ Implementado |
+| D005 | Arquitectura cognitiva de referencia (12 capas) | 📘 Documento definido, implementación progresiva |
+| D006 | TradingView MCP como fuente primaria (Node.js externo) | ⛔ SUPERSEDIDA por D010 |
+| D007 | Eliminar OANDA API del proyecto | ✅ Implementado |
+| D010 | Integrar TradingView CDP en price-feed Python (eliminar Node.js) | ⛔ SUPERSEDIDA por D013 |
+| D011 | Modelo binario de Operating Modes (ONLINE / OFFLINE) | ✅ Implementado |
+| D012 | Cadenas causales obligatorias + quality_score breakdown | ✅ Implementado |
+| D013 | tv-unified como único MCP de datos de mercado (4→1) | ✅ Implementado |
+| D014 | Lectura multi-timeframe (rápida vs profunda) | ✅ Implementado |
+| D015 | Indicador Aetheer en Pine Script (export JSON) | ✅ Implementado |
 
 ---
 
@@ -679,9 +689,9 @@ python -m pytest tests/ -v -k "fallback" --mock-sources=degraded
 ```json
 {
   "error": "ANALYSIS_UNAVAILABLE",
-  "reason": "KILL_SWITCH: DXY data unavailable or stale (>4h)",
-  "suggestion": "Intentar en 5-10 minutos o consultar datos puntuales con: 'precio DXY'",
-  "health_endpoint": "/health",
+  "reason": "KILL_SWITCH: TradingView offline (CDP + APIs + cache)",
+  "suggestion": "Verifica TradingView Desktop (puerto 9222) o consulta el monitor: scripts/tv-health-monitor.py",
+  "health_tool": "mcp__tv-unified__get_system_health",
   "timestamp": "ISO8601"
 }
 ```
@@ -689,10 +699,10 @@ python -m pytest tests/ -v -k "fallback" --mock-sources=degraded
 ### Recuperación Automática
 ```yaml
 escenarios:
-  price-feed_timeout:
-    acción: "reintentar 1 vez con timeout reducido (5s)"
-    fallback: "usar cache si age_hours < 15min"
-    si_falla: "marcar source_status=down, continuar con otros agentes"
+  tv-unified_timeout:
+    acción: "tv-unified ya implementa reintentos internos; caller solo reporta"
+    fallback: "tv-unified sirve cache automáticamente (stale si age < 30min, marcado)"
+    si_falla: "get_system_health → OFFLINE → kill switch activado"
   
   memory_write_failure:
     acción: "loguear error, continuar ejecución"

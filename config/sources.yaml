@@ -1,120 +1,53 @@
-price_sources:
-  - name: tradingview
-    priority: 0
-    type: mcp
-    description: "Feed primario — precio idéntico al gráfico del trader"
-    requires: "TradingView Desktop corriendo con --remote-debugging-port=9222"
-    instruments:
-      dxy: "TVC:DXY"
-      eurusd: "OANDA:EURUSD"
-      gbpusd: "OANDA:GBPUSD"
-      xauusd: "OANDA:XAUUSD"
-      vix: "TVC:VIX"
-      spx: "SP:SPX"
-      us10y: "TVC:US10Y"
-      us02y: "TVC:US02Y"
-      usoil: "TVC:USOIL"
-      de10y: "TVC:DE10Y"
-      gb10y: "TVC:GB10Y"
-    quality_score: 0.98
-    note: "OANDA: prefix es el exchange dentro de TradingView — no es la API de OANDA."
-    supports_deep_read: true 
-    requires_indicator_setup: true 
+# Configuración de fuentes de mercado (D013 — fuente única tv-unified)
+# Ver: Essence/06_DECISIONES.txt (D013)
 
-  - name: alpha_vantage
-    priority: 1
-    type: api
-    description: "Respaldo API cuando TradingView no disponible"
-    base_url: "https://www.alphavantage.co/query"
-    timeout_seconds: 10
-    rate_limit:
-      per_minute: 5
-      per_day: 25
-    instruments:
-      eurusd:
-        function: "CURRENCY_EXCHANGE_RATE"
-        from_currency: "EUR"
-        to_currency: "USD"
-      gbpusd:
-        function: "CURRENCY_EXCHANGE_RATE"
-        from_currency: "GBP"
-        to_currency: "USD"
-    note: "No soporta DXY. Solo pares Forex."
+tv_unified:
+  description: "Fuente única via TradingView Desktop CDP + APIs públicas TV + cache SQLite"
+  cdp:
+    port: 9222
+    host: "127.0.0.1"
+    requires: "TradingView Desktop con --remote-debugging-port=9222"
+  cache:
+    path: "db/tv_cache.sqlite"
+    stale_window_seconds: 1800  # 30 min
+    ttls:
+      price: 5
+      ohlcv: 60
+      correlations: 30
+      news: 1800
+      calendar: 3600
+  quality_score: 0.98  # live CDP — decae linealmente con cache age
 
-  - name: tradingeconomics
-    priority: 2
-    type: scrape
-    base_url: "https://tradingeconomics.com"
-    timeout_seconds: 10
-    instruments:
-      dxy: "/united-states/currency"
-      eurusd: "/eurusd:cur"
-      gbpusd: "/gbpusd:cur"
+  symbols:
+    dxy: "TVC:DXY"
+    eurusd: "OANDA:EURUSD"
+    gbpusd: "OANDA:GBPUSD"
+    xauusd: "OANDA:XAUUSD"
+    vix: "TVC:VIX"
+    spx: "SP:SPX"
+    us10y: "TVC:US10Y"
+    us02y: "TVC:US02Y"
+    usoil: "TVC:USOIL"
+    de10y: "TVC:DE10Y"
+    gb10y: "TVC:GB10Y"
+  note: "OANDA: prefix es el exchange dentro de TradingView — no es la API externa de OANDA."
 
-  - name: investing
-    priority: 3
-    type: scrape
-    base_url: "https://www.investing.com"
-    timeout_seconds: 10
+  news_api:
+    endpoint: "https://news-headlines.tradingview.com"
+    description: "JSON público sin cookies"
+  calendar_api:
+    endpoint: "https://economic-calendar.tradingview.com"
+    description: "JSON público — requiere headers Origin/Referer"
 
-  - name: xe
-    priority: 4
-    type: scrape
-    base_url: "https://www.xe.com"
-    timeout_seconds: 10
-    instruments:
-      eurusd: "/currencyconverter/convert/?From=EUR&To=USD"
-      gbpusd: "/currencyconverter/convert/?From=GBP&To=USD"
-
-  - name: yahoo_finance
-    priority: 5
-    type: scrape
-    base_url: "https://query1.finance.yahoo.com/v8/finance/chart/"
-    timeout_seconds: 10
-    instruments:
-      dxy: "DX-Y.NYB"
-      eurusd: "EURUSD=X"
-      gbpusd: "GBPUSD=X"
-
-divergence_threshold_pct: 0.15
-max_age_seconds: 14400  # 4 horas = kill switch
-
-news_rss:
-  macro:
-    cnbc_economy: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258"
-    wsj_economy: "https://feeds.a.wsj.com/xml/rss/3_7014.xml"
-    ft_markets: "https://www.ft.com/rss/markets"
-    marketwatch_topstories: "https://feeds.marketwatch.com/marketwatch/topstories"
-    investing_news: "https://www.investing.com/rss/news.rss"
-    forexlive: "https://www.forexlive.com/feed"
-    fed_press: "https://www.federalreserve.gov/feeds/press_all.xml"
-    ecb_press: "https://www.ecb.europa.eu/rss/press.html"
-  geopolitics:
-    bbc_world: "https://feeds.bbci.co.uk/news/world/rss.xml"
-    aljazeera: "https://www.aljazeera.com/xml/rss/all.xml"
-    reuters_world: "https://www.reutersagency.com/feed/?taxonomy=best-sectors&post_type=best"
-  health_check_interval_minutes: 60
-  dead_threshold_consecutive_failures: 5
-
-calendar:
-  sources:
-    - name: investing_api
-      type: json_api
-      priority: 0
-      url: "https://www.investing.com/economic-calendar/Service/getCalendarFilteredData"
-    - name: fxstreet_api
-      type: json_api
-      priority: 1
-      url: "https://calendar-api.fxstreet.com/en/api/v1/eventDates/"
-    - name: tradingeconomics
-      type: scrape
-      priority: 2
-      url: "https://tradingeconomics.com/calendar"
-  scrape_interval_minutes: 30
-  preload_interval_hours: 6
-  currencies: ["USD", "EUR", "GBP"]
+  health:
+    monitor_script: "scripts/tv-health-monitor.py"
+    env:
+      - "AETHEER_AUTORESTART"  # 1 para relanzar TV Desktop si cae
+      - "AETHEER_TV_LAUNCH_CMD"  # comando custom de lanzamiento
+      - "TV_MONITOR_INTERVAL"  # segundos entre probes
 
 fred:
+  # Mantenido en macro-data MCP para datos macro (FedWatch, yields fallback)
   base_url: "https://api.stlouisfed.org/fred/series/observations"
   series:
     us_10y: "DGS10"

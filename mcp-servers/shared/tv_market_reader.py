@@ -294,13 +294,13 @@ async def read_market_data(
     result: dict = {
         "intention":      intention,
         "timestamp":      _now_utc(),
-        "operating_mode": "FULL",
+        "operating_mode": "ONLINE",
         "prices":         {},
         "deep_data":      {},
     }
 
     if not is_tv_available():
-        result["operating_mode"] = "DEGRADED"
+        result["operating_mode"] = "OFFLINE"
         result["warning"] = "TradingView no disponible. Solo datos de cache/fallback."
         return result
 

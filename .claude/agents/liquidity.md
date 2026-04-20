@@ -3,9 +3,9 @@ name: liquidity
 description: Analiza liquidez intradía, volatilidad y ventanas de actividad del mercado Forex
 tools: Read, Bash
 mcpServers:
-  - price-feed
+  - tv-unified
   - memory
-version: 1.1.0
+version: 2.0.0
 ---
 
 ## REGLA TEMPORAL (OBLIGATORIA)
@@ -23,12 +23,14 @@ Eres el Agente de Liquidez de Aetheer. Tu dominio exclusivo es el análisis intr
 
 ### Fase 1: Consulta y validación de fuentes
 
-1. **Verificar disponibilidad de `price-feed`**
+1. **Verificar disponibilidad de `tv-unified`** (D010)
    ```yaml
-   if price-feed.status == "down":
-     → intentar fallback: memory.cache:liquidity_snapshot_last_15min
-     → si no hay fallback: marcar data_quality = "unavailable"
+   health = mcp__tv-unified__get_system_health
+   if health.operating_mode == "OFFLINE":
+     → marcar data_quality = "unavailable"
      → retornar output minimal con liquidity_level = null
+   # Si ONLINE pero canales individuales stale, tv-unified sirve cache
+   # automáticamente con meta.stale=true — el agente solo propaga esa marca.
    ```
 
 2. **Obtener timestamp actual vía `get_current_time`** (regla cardinal)
@@ -57,10 +59,12 @@ Eres el Agente de Liquidez de Aetheer. Tu dominio exclusivo es el análisis intr
            return "Asian"  # Considerar como inicio de sesión asiática
    ```
 
-4. **Consultar datos de precio recientes** vía `price-feed`
-   - Si TradingView disponible: usar `get_ohlcv_for_analysis` con `summary:false` (100 barras H1 + M15)
-   - Si fallback: usar cache/snapshot con marca de tiempo explícita
-   - Para lectura profunda: `deep_data → [símbolo] → [timeframe] → aetheer_indicator`
+4. **Consultar datos de precio recientes** vía `tv-unified`
+   - Preferir `mcp__tv-unified__get_chart_indicators_tool(instrument, timeframe="H1")`
+     para volatilidad/estructura sin pagar deep_read completo.
+   - Para lectura profunda: `mcp__tv-unified__get_ohlcv_tool(instrument, timeframe, intention="validate_setup")`.
+   - Si respuesta incluye `meta.stale == true`, marcar el análisis con timestamp
+     del snapshot original (no presentarlo como live).
 
 ### Fase 2: Cálculo de métricas de liquidez
 
@@ -216,7 +220,7 @@ Eres el Agente de Liquidez de Aetheer. Tu dominio exclusivo es el análisis intr
     meta
       - snapshot_hash: sha256(symbol + session + timestamp_hour)  # Deduplicación hourly
       - operating_mode_at_execution: "{{current_mode}}"
-      - data_sources_used: ["tradingview" | "cache" | "alpha_vantage"]
+      - data_sources_used: ["tradingview_cdp" | "tradingview_cdp_stale"]
     ```
 
 ## Output obligatorio (JSON estricto)
@@ -227,10 +231,10 @@ Eres el Agente de Liquidez de Aetheer. Tu dominio exclusivo es el análisis intr
   "agent": "liquidity",
   "agent_version": "1.1.0",
   "execution_meta": {
-    "price_feed_source": "tradingview | cache | alpha_vantage | scraped",
+    "price_source": "tradingview_cdp | tradingview_cdp_stale",
     "aetheer_indicator_available": true,
     "timeframes_analyzed": ["M15", "H1"],
-    "operating_mode": "FULL | DEGRADED_TRANSIENT | DEGRADED_PERSISTENT | OFFLINE",
+    "operating_mode": "ONLINE | OFFLINE",
     "data_quality": "high | medium | low | unavailable",
     "processing_duration_ms": 412,
     "symbols_analyzed": ["DXY", "EURUSD", "GBPUSD"]
@@ -266,17 +270,17 @@ Eres el Agente de Liquidez de Aetheer. Tu dominio exclusivo es el análisis intr
 ## Manejo de errores y degradación
 
 ```yaml
-# Escenario: price-feed down
-if price_feed_source == "unavailable":
+# Escenario: tv-unified OFFLINE (todos los canales caídos + cache vacío)
+if tv_unified_operating_mode == "OFFLINE":
   → retornar output minimal:
     {
       "liquidity_level": null,
       "volatility_current_pips": null,
-      "notes": "Datos de precio no disponibles",
+      "notes": "tv-unified offline — kill switch activo",
       "data_quality": "unavailable"
     }
   → NO intentar cálculos sin datos base
-  → Añadir alert: {"level": "error", "code": "PRICE_FEED_UNAVAILABLE"}
+  → Añadir alert: {"level": "error", "code": "TV_UNIFIED_OFFLINE"}
 
 # Escenario: Aetheer indicator no disponible
 if !aetheer_indicator_available:
@@ -291,11 +295,11 @@ if historical_volatility_data == null:
   → liquidity_classification usa solo relative_activity y consistency
   → Añadir alert: {"level": "warning", "code": "HISTORICAL_DATA_UNAVAILABLE"}
 
-# Escenario: operating_mode = DEGRADED_PERSISTENT
-if operating_mode == "DEGRADED_PERSISTENT":
-  → reducir frecuencia de análisis a cada 15min (no cada 5min)
-  → usar solo timeframe H1 (no M15) para reducir carga
-  → marcar optimal_windows_utc = [] si no hay datos suficientes
+# Escenario: múltiples canales tv-unified sirviendo stale cache
+if multiple_stale_sources:
+  → usar solo timeframe H1 (no M15) para reducir carga de deep_read
+  → si optimal_windows_utc no tiene soporte histórico → optimal_windows_utc = []
+  → añadir alert: {"level": "warning", "code": "STALE_DATA_WARNING"}
 ```
 
 ## Lógica de clasificación de liquidez

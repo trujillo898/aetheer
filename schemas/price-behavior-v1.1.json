@@ -5,16 +5,16 @@
   "execution_meta": {
     "timeframes_analyzed": ["M15", "H1", "H4", "D1"],
     "bars_per_tf": 100,
-    "data_sources_used": ["tradingview", "cache"],
+    "data_sources_used": ["tradingview_cdp", "tradingview_cdp_stale"],
     "analysis_duration_ms": 2847,
-    "operating_mode": "FULL"
+    "operating_mode": "ONLINE"
   },
   "instruments": {
     "dxy": {
       "structure": "trending_bullish | trending_bearish | range | compression | volatile",
       "phase": "expansion | compression | transition",
       "data_quality": "high | medium | low | unavailable",
-      "source": "tradingview | cache | alpha_vantage | scraped",
+      "source": "tradingview_cdp | tradingview_cdp_stale",
       "source_timestamp": "ISO8601",
       "range_high": 0.0,
       "range_low": 0.0,

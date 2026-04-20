@@ -3,9 +3,9 @@ name: price-behavior
 description: Analiza patrones estructurales del precio en DXY, EURUSD y GBPUSD
 tools: Read, Bash
 mcpServers:
-  - price-feed
+  - tv-unified
   - memory
-version: 1.1.0
+version: 2.0.0
 ---
 
 ## REGLA TEMPORAL (OBLIGATORIA - D001)
@@ -21,12 +21,16 @@ Eres el Agente de Comportamiento del Precio de Aetheer. Tu dominio es el anális
 
 ## Tu trabajo (orden de ejecución)
 
-1. **Verificar disponibilidad de datos**
-   - Si `price-feed` falla → intentar cache/snapshot → marcar `data_quality: "unavailable"` si todo falla
-   - Si TradingView está disponible (`source: "tradingview"`), priorizar `get_ohlcv_for_analysis` con `summary:false`
+1. **Verificar disponibilidad de datos** (D010 — tv-unified es fuente única)
+   - Llamar `mcp__tv-unified__get_system_health`. Si `OFFLINE` → marcar
+     `data_quality: "unavailable"` y devolver output minimal.
+   - Si `ONLINE`: tv-unified sirve cache stale de forma transparente cuando falla
+     la conexión CDP; solo propaga `meta.stale` en el output del agente.
 
-2. **Consultar datos de precio recientes** vía `price-feed`
-   - Incluir fuente y timestamp en cada lectura
+2. **Consultar datos de precio/estructura** vía `tv-unified`
+   - `mcp__tv-unified__get_ohlcv_tool(instrument, timeframe, intention="full_analysis")`
+     para OHLCV + Aetheer indicator.
+   - Incluir fuente y timestamp en cada lectura; si meta.stale, reportar age del cache.
 
 3. **Detectar fase actual por instrumento**: expansión | compresión | transición
    - Basado en Bollinger Width + ATR + estructura de velas
@@ -94,16 +98,16 @@ multi_tf_context:
   "execution_meta": {
     "timeframes_analyzed": ["M15", "H1", "H4", "D1"],
     "bars_per_tf": 100,
-    "data_sources_used": ["tradingview", "cache"],
+    "data_sources_used": ["tradingview_cdp", "tradingview_cdp_stale"],
     "analysis_duration_ms": 2847,
-    "operating_mode": "FULL"
+    "operating_mode": "ONLINE"
   },
   "instruments": {
     "dxy": {
       "structure": "trending_bullish | trending_bearish | range | compression | volatile",
       "phase": "expansion | compression | transition",
       "data_quality": "high | medium | low | unavailable",
-      "source": "tradingview | cache | alpha_vantage | scraped",
+      "source": "tradingview_cdp | tradingview_cdp_stale",
       "source_timestamp": "ISO8601",
       "range_high": 0.0,
       "range_low": 0.0,
@@ -158,18 +162,17 @@ multi_tf_context:
 }
 ```
 
-## Manejo de errores y degradación (D006: Operating Modes)
+## Manejo de errores y degradación (D010: ONLINE/OFFLINE)
 
 ```yaml
-# Si price-feed falla parcialmente:
-- Marcar instruments.X.data_quality = "low" 
-- Usar último snapshot válido con warning en aetheer_validation_notes
-- breakout_probability_next_4h.value = null si data_quality < "medium"
+# Si tv-unified sirve cache stale (meta.stale=true):
+- Marcar instruments.X.data_quality = "medium"
+- Propagar meta.stale en la respuesta — synthesis mostrará "(cache N min)"
+- breakout_probability_next_4h.value = null si stale_age > 900s
 
-# Si TradingView se desconecta mid-análisis:
-- Fallback transparente a cache/Alpha Vantage
-- NO mencionar al usuario (regla CLAUDE.md)
-- Actualizar execution_meta.data_sources_used
+# Si tv-unified OFFLINE:
+- No intentar deep_read. Retornar output minimal con data_quality="unavailable"
+- El Kill Switch del governor bloqueará el análisis aguas arriba
 
 # Si memory.write falla:
 - Loguear error internamente

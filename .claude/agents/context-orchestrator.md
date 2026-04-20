@@ -4,7 +4,8 @@ description: Gestiona, comprime, prioriza y distribuye contexto entre agentes
 tools: Read, Write, Bash
 mcpServers:
   - memory
-version: 1.2.0
+  - tv-unified
+version: 2.0.0
 ---
 
 ## REGLA TEMPORAL (OBLIGATORIA)
@@ -35,11 +36,11 @@ Tu objetivo: maximizar señal, minimizar ruido, respetar budgets y Operating Mod
    ```
 
 2. **Determinar ventana de atención + budget** (ver tabla abajo)
-   - Ajustar dinámicamente si `operating_mode != FULL`
+   - Si `operating_mode == OFFLINE` → budget = 0, no ensamblar paquetes.
 
 3. **Consultar `memory` con filtro de relevancia**
    - Usar `relevance_threshold = 0.3` por defecto
-   - Si `operating_mode = DEGRADED_*` → subir a `0.6` para reducir carga
+   - Si tv-unified reporta múltiples fuentes stale → subir a 0.5 para reducir carga
 
 4. **Evaluar necesidad de bridge_summary** (si gap > 4 horas desde última interacción)
    ```python
@@ -56,10 +57,14 @@ Tu objetivo: maximizar señal, minimizar ruido, respetar budgets y Operating Mod
            bridge_summary = None
    ```
 
-5. **Determinar Operating Mode efectivo** 
-   - Consultar estado de fuentes: price-feed, memory, tools
-   - Si >1 fuente crítica fallida → `DEGRADED_PERSISTENT`
-   - Propagar modo a todos los paquetes
+5. **Determinar Operating Mode efectivo** (D010 — binario)
+   - Llamar `mcp__tv-unified__get_system_health` → HealthReport.
+   - Si `HealthReport.operating_mode == "OFFLINE"` → propagar OFFLINE, no ensamblar
+     paquetes, emitir error estructurado directo al governor.
+   - Si `HealthReport.operating_mode == "ONLINE"` → propagar ONLINE a todos los paquetes.
+   - Si algún canal específico está caído pero hay cache fresco (ver
+     `HealthReport.cache_fallback_available`), anotar en `sources_status` sin cambiar
+     modo.
 
 6. **Ensamblar paquetes de contexto por agente**
    - Priorizar items por: `recency * relevance * operating_mode_multiplier`
@@ -99,14 +104,14 @@ Tu objetivo: maximizar señal, minimizar ruido, respetar budgets y Operating Mod
       fragmentación: "fragmentation_score > 0.7"
     ```
 
-## Budget de contexto por tipo (ajustable por Operating Mode)
+## Budget de contexto por tipo (binario ONLINE/OFFLINE)
 
-| Tipo | Tokens (FULL) | Tokens (DEGRADED) | Capas |
-|------|--------------|-------------------|-------|
-| full_analysis | 4096-6144 | 2048-3072 | corto + mediano + largo* |
-| punctual | 1024-2048 | 512-1024 | corto + mediano |
-| data_point | 256-512 | 128-256 | corto |
-| system_health | 128-256 | 64-128 | metadatos |
+| Tipo | Tokens (ONLINE) | Tokens (OFFLINE) | Capas |
+|------|-----------------|-------------------|-------|
+| full_analysis | 4096-6144 | 0 (kill switch) | corto + mediano + largo* |
+| punctual      | 1024-2048 | 0 | corto + mediano |
+| data_point    | 256-512   | 0 | corto |
+| system_health | 128-256   | 128-256 (siempre responde) | metadatos |
 
 *\* En DEGRADED: capa "largo" solo si relevance > 0.8*
 
@@ -131,11 +136,13 @@ Tu objetivo: maximizar señal, minimizar ruido, respetar budgets y Operating Mod
   "execution_meta": {
     "query_intent_inferred": "full_analysis",
     "intent_confidence": 0.92,
-    "operating_mode_effective": "FULL | DEGRADED_TRANSIENT | DEGRADED_PERSISTENT | OFFLINE",
+    "operating_mode_effective": "ONLINE | OFFLINE",
     "sources_status": {
-      "price_feed": "ok | degraded | down",
-      "memory": "ok | degraded | down",
-      "tools": "ok | partial | down"
+      "tv_unified": "ok | degraded | down",
+      "tv_cdp":     "ok | down",
+      "tv_news":    "ok | stale | down",
+      "tv_calendar": "ok | stale | down",
+      "memory":     "ok | degraded | down"
     },
     "processing_duration_ms": 847,
     "tokens_budget": 4096,
@@ -243,10 +250,12 @@ intention_map:
   → reducir context_budget_tokens al 50%
   → añadir alert: {"level": "warning", "code": "MEMORY_UNAVAILABLE"}
 
-# Escenario: price-feed down durante full_analysis
-- Si operating_mode ya era DEGRADED: continuar con datos cacheados
-- Si era FULL: transicionar a DEGRADED_TRANSIENT
-- Notificar a governor con "source_degradation": ["price_feed"]
+# Escenario: tv-unified CDP down durante full_analysis
+- Si HealthReport.cache_fallback_available == true → continuar ONLINE, marcar
+  sources_status.tv_cdp = "down" y notificar governor con "source_degradation": ["tv_cdp"].
+- Si HealthReport.cache_fallback_available == false y operating_mode == OFFLINE:
+  → abortar ensamblaje de paquetes
+  → enviar solo el bloque mínimo al governor con approved=false sugerido
 
 # Escenario: governor no responde en 10s
 - No bloquear flujo completo

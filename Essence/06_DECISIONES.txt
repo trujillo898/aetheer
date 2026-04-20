@@ -212,4 +212,229 @@ IMPLEMENTACIÓN ACTUAL: tv_bridge.py + tv_commands.py en mcp-servers/shared/,
   server.py actualizado con 3 tools nuevos (tv_health_check, get_chart_state, get_quote_tv),
   tradingview eliminado de .mcp.json, aiohttp añadido a requirements.txt
 IMPLEMENTACIÓN IDEAL: igual — esta es la arquitectura correcta para Aetheer
+ESTADO: SUPERSEDIDA por D013 (tv-unified consolida 4 MCPs en 1; la integración en
+  price-feed fue paso intermedio antes de la unificación completa)
+
+--- D011 ---
+DECISIÓN: Modelo binario de Operating Modes (ONLINE / OFFLINE)
+FECHA: abril 2026
+CONTEXTO: el diseño original de Operating Modes tenía 5 estados:
+  FULL, DEGRADED_TRANSIENT, DEGRADED_PERSISTENT, MINIMAL, OFFLINE.
+  Cada estado tenía su propio budget de tokens, banner de synthesis y rutas de
+  código en governor. En producción se observó que los estados intermedios
+  (DEGRADED_*, MINIMAL) no cambiaban la experiencia del usuario — solo
+  multiplicaban código y casos de testing. La degradación que realmente importa
+  operativamente es binaria: el dato es servible o no lo es.
+OPCIONES:
+  A) Colapsar a binario (ONLINE / OFFLINE) + flag meta.stale en línea
+     — pros: 1 estado vs 5, matriz de testing 2×N en vez de 5×N,
+       transparencia de cache stale vía "(cache N min)" en lugar de banner global,
+       coherencia de decisión (servible vs no servible)
+     — contras: se pierde granularidad informativa sobre tipo de degradación
+  B) Mantener 5 estados, simplificar rutas duplicadas
+     — pros: preserva semántica original
+     — contras: complejidad multiplicativa sin valor percibido por el usuario
+  C) Modelo ternario (ONLINE / PARTIAL / OFFLINE)
+     — pros: punto medio entre granularidad y simplicidad
+     — contras: PARTIAL sigue requiriendo decidir cuándo es "suficiente"
+DECIDIDO: A — binario con flag stale propagado end-to-end.
+  Reglas:
+    ONLINE: cualquier ruta que devuelva dato (live o cache < 30min). Análisis completo.
+    OFFLINE: todos los canales caídos Y cache > 30min. Kill Switch, solo error.
+  Transición: única fuente de verdad es tv-unified.get_system_health.
+  Umbral de quality: quality_score_global < 0.60 flipea directamente a OFFLINE
+  (antes bajaba a DEGRADED_PERSISTENT; ya no existe ese estado intermedio).
+IMPACTO:
+  - Reemplaza el modelo de 5 estados del diseño original
+  - governor evalúa un solo gate: ONLINE con approved=true, o OFFLINE con approved=false
+  - synthesis marca cache stale con "(cache N min)" en línea sin cambiar de modo
+  - context-orchestrator tiene 2 budgets (6144 tokens ONLINE, 0 tokens OFFLINE)
+  - Matriz de tests colapsa de 5×N a 2×N
+  - Banner de synthesis desaparece para estados intermedios (reemplazado por marca inline)
+IMPLEMENTACIÓN ACTUAL: governor.md, context-orchestrator.md, synthesis.md,
+  y todos los subagentes usan ONLINE/OFFLINE. CLAUDE.md refleja el modelo binario.
+  schemas/*.json validan operating_mode en {ONLINE, OFFLINE}.
+IMPLEMENTACIÓN IDEAL: igual — la simplicidad binaria es la arquitectura correcta.
 ESTADO: implementado
+
+--- D012 ---
+DECISIÓN: Cadenas causales obligatorias y breakdown de quality_score
+FECHA: abril 2026
+CONTEXTO: los análisis direccionales sin explicación de por qué el mercado se
+  movería en una dirección son ruido. Los LLMs tienden a afirmar sin articular
+  mecanismo causal. Además, sin un scoring estructurado de calidad, el governor
+  no puede decidir objetivamente cuándo aprobar o rechazar un output.
+DECIDIDO:
+  1. Toda afirmación direccional DEBE presentarse como causal_chain con:
+     - cause (evento/estructura con fuente)
+     - effect (consecuencia direccional medible)
+     - invalid_condition (OBLIGATORIO — qué invalidaría la cadena)
+     - confidence [0.0, 1.0]
+     - timeframe (M15, H1, H4, D1, W1)
+     - supporting_evidence[] y contradicting_evidence[]
+  2. Si un agente no puede articular invalid_condition, la cadena no existe y
+     el governor la rechaza.
+  3. quality_score_global se calcula con 5 factores ponderados:
+     - Freshness (30%): antigüedad de datos clave
+     - Completeness (25%): % de campos requeridos presentes
+     - Consistency (20%): alineación entre agentes
+     - Source reliability (15%): tradingview live > tradingview stale > fallback
+     - Aetheer validity (10%): indicador Pine disponible y válido
+  4. Gating binario contra D011: quality_score < 0.60 → OFFLINE / approved=false.
+IMPACTO:
+  - governor rechaza causal_chains sin invalid_condition
+  - synthesis debe exponer contradictions_to_expose[] en vez de ocultarlas
+  - source_reliability colapsa a 2 valores tras D013:
+    tradingview_cdp (1.0) | tradingview_cdp_stale (0.7 escalando por age)
+  - Umbral 0.60 es el gate único de aprobación (antes había gate intermedio a 0.70)
+IMPLEMENTACIÓN ACTUAL: governor.md define calculate_quality_score y
+  detect_contradictions. Todos los subagentes emiten causal_chains con
+  invalid_condition. schemas/*.json validan el campo.
+IMPLEMENTACIÓN IDEAL: Confidence Service transversal que calcule score
+  desglosado por dimensión (freshness, structure, events, macro) en vez
+  de un número global. Ver 05_ESTADO_ACTUAL.txt (Fase 2).
+ESTADO: implementado (breakdown global); Confidence Service por dimensión pendiente
+
+--- D013 ---
+DECISIÓN: tv-unified como único MCP de datos de mercado (consolidación 4→1)
+FECHA: abril 2026
+CONTEXTO: tras D010 (eliminación de Node.js), Aetheer quedó con 5 MCP servers
+  Python: price-feed (TV CDP + Alpha Vantage + scraping), news-feed (Investing),
+  economic-calendar (Investing + fallback), macro-data (FRED + CME) y memory.
+  Observaciones en producción:
+    1. La cascada Alpha Vantage / Yahoo / Investing era inútil — Alpha Vantage
+       tiene 500ms de retraso respecto a TV CDP, Yahoo no tiene TVC:DXY,
+       Investing rate-limita agresivamente. TV CDP era la única fuente viable.
+    2. Cada MCP mantenía su propio cache con TTLs inconsistentes.
+    3. TradingView expone APIs JSON públicas para news (news-headlines.tradingview.com)
+       y calendar (economic-calendar.tradingview.com), sin cookies, sin scraping.
+OPCIONES:
+  A) Consolidar en tv-unified: CDP + APIs JSON de TV + cache SQLite único
+     — pros: 3 MCPs vs 5, 1 cache vs 4, latencia menor, símbolos consistentes
+       con lo que ve el trader, transparencia de stale end-to-end
+     — contras: single-vendor dependency (TV down > 30min → OFFLINE)
+  B) Mantener 5 MCPs, unificar solo el cache
+     — pros: redundancia teórica, menos cambios
+     — contras: cascadas nunca se usaban en producción, complejidad persiste
+  C) Agregar más fuentes redundantes (Finnhub, IEX, Polygon)
+     — pros: máxima redundancia
+     — contras: cada fuente es otro contrato a mantener, mismo problema de
+       símbolos inconsistentes con TradingView que ve el trader
+DECIDIDO: A — tv-unified es el único MCP para price, OHLCV, correlaciones,
+  news y calendario. macro-data se mantiene aislado (FRED + CME son
+  independientes de TV). memory se mantiene.
+  Cache-first con SQLite único (db/tv_cache.sqlite):
+    - TTL por categoría: price 5s, OHLCV 60s, news 30min, calendar 1h
+    - Ventana stale uniforme: 30 minutos
+    - Flag meta.stale propagado end-to-end
+  Política de servicio:
+    1) Cache fresco → servir
+    2) Cache miss → llamar TV (CDP o HTTP JSON)
+    3) TV falla → servir cache stale si age < 30min con meta.stale=True
+    4) Sin cache y TV caído → propagar a OFFLINE global
+  tv-health-monitor (scripts/tv-health-monitor.py) vigila CDP y relanza
+  TradingView Desktop opcionalmente (env-gated: AETHEER_AUTORESTART=1).
+IMPACTO:
+  - .mcp.json: 5 servers → 3 (tv-unified, macro-data, memory)
+  - Eliminados: price-feed, news-feed, economic-calendar
+  - Single source of truth para Operating Modes: tv-unified.get_system_health
+  - source_reliability colapsa a tradingview_cdp | tradingview_cdp_stale
+  - Matriz de símbolos TV centralizada (TVC:DXY, OANDA:EURUSD dentro de TV, etc.)
+  - Supersede explícito de Essence-D010 (Node.js→Python era paso intermedio)
+RIESGOS ACEPTADOS:
+  - Single-vendor: si TV Desktop cae y cache > 30min → OFFLINE total.
+    Mitigación: tv-health-monitor + cache stale de 30min + kill switch transparente.
+  - APIs no documentadas (news-headlines, economic-calendar): sin contrato estable.
+    Mitigación: tests contra producción, parcheo manual si cambian.
+  - Pérdida de redundancia histórica: Alpha Vantage y FRED cubrían históricos
+    profundos; Aetheer ya no lo hace para precio (FRED sigue en macro-data).
+IMPLEMENTACIÓN ACTUAL: mcp-servers/tv-unified/ (schemas, bridge, cache_store,
+  sources, server.py). scripts/tv-health-monitor.py. db/tv_cache.sqlite.
+  .mcp.json reducido a 3 servers. Todos los subagentes llaman tv-unified.
+IMPLEMENTACIÓN IDEAL: igual — tv-unified es la arquitectura correcta.
+  Extensiones futuras: Data Integrity Agent como gate formal sobre tv-unified
+  con cross-validation contra macro-data yields.
+ESTADO: implementado
+
+--- D014 ---
+DECISIÓN: Lectura multi-timeframe con dos modos (rápida vs profunda)
+FECHA: abril 2026
+CONTEXTO: leer múltiples instrumentos y timeframes desde TradingView requiere
+  tab switching, lo cual bloquea temporalmente el chart activo del trader.
+  Hacerlo para toda consulta es invasivo; no hacerlo nunca limita el análisis.
+OPCIONES:
+  A) Dos modos explícitos: lectura_rapida (quote-only, no intrusiva) y
+     lectura_profunda (tab/TF switching, interferencia temporal)
+     — pros: el trader sabe cuándo se le va a bloquear el chart;
+       el orchestrator decide modo según intención
+     — contras: requiere clasificación de intención upfront
+  B) Siempre profunda: coherencia máxima en todos los análisis
+     — contras: data_point / system_health se vuelven invasivos sin necesidad
+  C) Siempre rápida: sin interferencia
+     — contras: full_analysis pierde contexto multi-TF crítico
+DECIDIDO: A — dos modos seleccionados por intención.
+  lectura_rapida: quote_get de ~8 símbolos, ~2-3s, sin interferencia.
+    Uso: heartbeat, data_point, system_health.
+  lectura_profunda: tab switch + chart_set_timeframe + OHLCV + Aetheer indicator.
+    Uso: full_analysis, validate_setup, macro_question, sudden_move.
+  Profundidad por intención:
+    full_analysis:  tabs=[DXY,EURUSD,GBPUSD] TFs=[D1,H4,H1,M15] ~24-30s
+    validate_setup: tabs=[DXY, par]         TFs=[H1,M15]       ~8-10s
+    macro_question: tabs=[DXY]              TFs=[D1,H4]        ~4-6s
+    sudden_move:    tabs=[par_afectado]     TFs=[M15,H1]       ~4-6s
+    data_point:     tabs=[]                 TFs=[]             ~2s (solo quote)
+  Setup requerido: TV Desktop con 3 tabs (DXY, EURUSD, GBPUSD) + Aetheer Indicator
+  en cada chart.
+IMPACTO:
+  - context-orchestrator decide modo según query_intent
+  - tv-unified.get_ohlcv_tool hace tab switch transparente en profunda
+  - synthesis puede marcar "(análisis superficial, no se hizo deep read)" si
+    lectura_rapida fue suficiente
+IMPLEMENTACIÓN ACTUAL: tv-unified tools (get_price_tool, get_ohlcv_tool,
+  get_chart_indicators_tool). setup de 3 tabs es responsabilidad del trader.
+IMPLEMENTACIÓN IDEAL: detección automática de tabs disponibles con fallback
+  si el setup no está. Data Integrity Agent validaría que las 3 tabs existen.
+ESTADO: implementado (requiere pruebas en vivo, ver 05_ESTADO_ACTUAL.txt)
+
+--- D015 ---
+DECISIÓN: Indicador Aetheer en Pine Script como fuente estructurada del chart
+FECHA: abril 2026
+CONTEXTO: TradingView expone precio y OHLCV, pero los agentes necesitan
+  datos derivados (ATR, EMAs, sesiones, niveles clave, fase de compresión/
+  expansión) con la misma exactitud que ve el trader en su chart. Calcular
+  estos valores fuera de TV introduce desync y duplica lógica.
+OPCIONES:
+  A) Indicador Pine Script que computa todo en TV y exporta vía JSON en
+     label oculto, leído por tv-unified con Runtime.evaluate
+     — pros: mismo cálculo que el chart del trader, cero desync,
+       extensible editando Pine
+     — contras: depende de Pine Script runtime, un bug en el indicador
+       afecta todos los agentes
+  B) Replicar indicadores en Python (talib o custom)
+     — contras: doble mantenimiento, riesgo de divergencia numérica
+  C) Sin indicadores derivados, solo OHLCV crudo
+     — contras: cada agente recomputa ATR/EMAs con su propio código
+DECIDIDO: A — Aetheer indicator en Pine Script exporta JSON estructurado.
+  Ubicación: indicators/aetheer_indicator.pine.
+  Datos exportados:
+    volatilidad: atr14, atr14_sma, atr_expanding, vol_rel, session_range
+    estructura:  ema20/50/200, price_vs_emaXX, ema_align, rsi14, rsi_div,
+                 price_phase (compression/expansion/transition vía BB width)
+    sesiones:    session (Asian|London|NewYork|London-NY-Overlap|OffHours),
+                 sess_high/low, prev_sess_high/low, sess_break
+    niveles:     prev_day_high/low, day_open, prev_week_high/low
+    multi_tf:    htf_d1_ema_align, htf_h4_ema_align, h1_phase, m15_atr14
+    metadata:    aetheer_version, timestamp_utc, symbol, timeframe,
+                 data_quality (placeholder), source
+  Lectura: tv-unified.get_chart_indicators_tool extrae solo el bloque Aetheer.
+IMPACTO:
+  - El indicador NO es visual — la tabla es debug; el consumo real es JSON
+  - quality_score incluye aetheer_validity (10%) basado en disponibilidad
+  - Si el indicador falla silenciosamente, quality baja (ver memoria:
+    project_aetheer_indicator_silent_fail.md)
+IMPLEMENTACIÓN ACTUAL: indicators/aetheer_indicator.pine v1.2.0
+IMPLEMENTACIÓN IDEAL: versionado estricto con tests de regresión numérica
+  contra snapshots históricos antes de updatear Pine.
+ESTADO: implementado
+
+

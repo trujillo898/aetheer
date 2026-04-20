@@ -1,16 +1,12 @@
 {
   "mcpServers": {
-    "price-feed": {
+    "tv-unified": {
       "command": "/home/thomas/aetheer/.venv/bin/python",
-      "args": ["/home/thomas/aetheer/mcp-servers/price-feed/server.py"],
+      "args": ["/home/thomas/aetheer/mcp-servers/tv-unified/server.py"],
       "env": {
-        "ALPHA_VANTAGE_API_KEY": "IIQJD9H0ORUS3AVC"
+        "TV_CDP_PORT": "9222",
+        "TV_CACHE_DB": "/home/thomas/aetheer/db/tv_cache.sqlite"
       }
-    },
-    "economic-calendar": {
-      "command": "/home/thomas/aetheer/.venv/bin/python",
-      "args": ["/home/thomas/aetheer/mcp-servers/economic-calendar/server.py"],
-      "env": {}
     },
     "macro-data": {
       "command": "/home/thomas/aetheer/.venv/bin/python",
@@ -18,11 +14,6 @@
       "env": {
         "FRED_API_KEY": "fb864195ca02554136668027ec536a00"
       }
-    },
-    "news-feed": {
-      "command": "/home/thomas/aetheer/.venv/bin/python",
-      "args": ["/home/thomas/aetheer/mcp-servers/news-feed/server.py"],
-      "env": {}
     },
     "memory": {
       "command": "/home/thomas/aetheer/.venv/bin/python",

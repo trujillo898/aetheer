@@ -10,7 +10,7 @@
     "agents_evaluated": ["liquidity", "events", "price-behavior", "macro"],
     "orchestrator_context_used": true
   },
-  "operating_mode": "FULL | DEGRADED | MINIMAL | OFFLINE",
+  "operating_mode": "ONLINE | OFFLINE",
   "operating_mode_rationale": "quality_score=0.94 + all_data_fresh + no_critical_contradictions",
   "approved": true,
   "quality_score_global": 0.94,
@@ -22,7 +22,7 @@
     "aetheer_validity": 0.10
   },
   "budget_tokens_allocated": 5200,
-  "budget_tokens_rationale": "FULL mode + full_analysis intent = 5200/6144 tokens",
+  "budget_tokens_rationale": "ONLINE mode + full_analysis intent = 5200/6144 tokens",
   "subagents_called": ["liquidity", "events", "price-behavior", "macro"],
   "contradictions_detected": [
     {

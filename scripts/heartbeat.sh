@@ -22,9 +22,9 @@ fi
 
 echo ""
 
-# Verificar MCP servers
+# Verificar MCP servers (D010 — 3 servers)
 echo "[MCP SERVERS]"
-for server in price-feed economic-calendar macro-data news-feed memory; do
+for server in tv-unified macro-data memory; do
     if [ -f "mcp-servers/$server/server.py" ]; then
         echo "  [OK] $server"
     else
@@ -34,9 +34,9 @@ done
 
 echo ""
 
-# Verificar agentes
+# Verificar agentes (incluye governor)
 echo "[AGENTS]"
-for agent in liquidity events price-behavior macro context-orchestrator synthesis; do
+for agent in liquidity events price-behavior macro context-orchestrator synthesis governor; do
     if [ -f ".claude/agents/$agent.md" ]; then
         echo "  [OK] $agent"
     else
@@ -46,33 +46,26 @@ done
 
 echo ""
 
-# Verificar fuentes de precio API
-echo "[PRICE SOURCES]"
-if [ -n "$ALPHA_VANTAGE_API_KEY" ] && [ "$ALPHA_VANTAGE_API_KEY" != "" ]; then
-    echo "  [OK] Alpha Vantage — key configurada"
+# Verificar TV cache
+echo "[TV CACHE]"
+if [ -f "db/tv_cache.sqlite" ]; then
+    echo "  [OK] tv_cache.sqlite presente ($(du -h db/tv_cache.sqlite | cut -f1))"
+    echo "  Entries: $(sqlite3 db/tv_cache.sqlite 'SELECT COUNT(*) FROM snapshots;' 2>/dev/null || echo 'N/A')"
 else
-    echo "  [--] Alpha Vantage — sin key (usando scraping fallback)"
+    echo "  [--] tv_cache.sqlite no existe (se creará al primer uso)"
 fi
 
 echo ""
 
-# Verificar TradingView MCP
-echo "[TRADINGVIEW MCP]"
-TV_SERVER="$HOME/tradingview-mcp/src/server.js"
-TV_CLI="$HOME/tradingview-mcp/src/cli/index.js"
-if [ ! -f "$TV_CLI" ]; then
-    echo "  TradingView MCP: not installed"
-    echo "  Para instalar: git clone https://github.com/tradesdontlie/tradingview-mcp ~/tradingview-mcp && cd ~/tradingview-mcp && npm install"
+# Verificar TradingView Desktop CDP (fuente única — D010)
+echo "[TRADINGVIEW CDP — D010]"
+CDP_PORT=${TV_CDP_PORT:-9222}
+if curl -s -m 2 "http://127.0.0.1:${CDP_PORT}/json/version" > /dev/null 2>&1; then
+    echo "  [OK] TradingView Desktop CDP activo en puerto ${CDP_PORT}"
 else
-    TV_RESULT=$(timeout 5 node "$TV_CLI" status 2>/dev/null)
-    TV_SUCCESS=$(echo "$TV_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('success',''))" 2>/dev/null)
-    if [ "$TV_SUCCESS" = "True" ]; then
-        TV_SYMBOL=$(echo "$TV_RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('chart_symbol','unknown'))" 2>/dev/null)
-        echo "  TradingView MCP: connected (primary data source) — símbolo activo: $TV_SYMBOL"
-    else
-        echo "  TradingView MCP: not available (using API fallback)"
-        echo "  Para activar: lanzar TradingView Desktop con --remote-debugging-port=9222"
-    fi
+    echo "  [FAIL] TradingView Desktop NO responde en puerto ${CDP_PORT}"
+    echo "  Para activar: lanzar TV Desktop con --remote-debugging-port=${CDP_PORT}"
+    echo "  Monitor automático: scripts/tv-health-monitor.py"
 fi
 
 echo ""

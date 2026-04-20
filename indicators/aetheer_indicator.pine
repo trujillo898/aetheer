@@ -150,7 +150,7 @@ m15_volatility = include_htf ? request.security(syminfo.tickerid, "15", atr14, l
 // ============================================================================
 // EXPORTACIÓN JSON PARA MCP (CRÍTICO)
 // ============================================================================
-// Este objeto JSON es consumido por los agentes vía price-feed MCP server
+// Este objeto JSON es consumido por los agentes vía tv-unified MCP server (D010)
 // Cualquier cambio aquí requiere actualizar schemas en agents/
 
 // Helpers para construcción de JSON válido

@@ -5,9 +5,9 @@
   "execution_meta": {
     "query_intent_inferred": "full_analysis",
     "intent_confidence": 0.92,
-    "operating_mode_effective": "FULL | DEGRADED_TRANSIENT | DEGRADED_PERSISTENT | OFFLINE",
+    "operating_mode_effective": "ONLINE | OFFLINE",
     "sources_status": {
-      "price_feed": "ok | degraded | down",
+      "tv_unified": "ok | degraded | down",
       "memory": "ok | degraded | down",
       "tools": "ok | partial | down"
     },
