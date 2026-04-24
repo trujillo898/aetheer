@@ -1,4 +1,13 @@
 # AETHEER — Sistema de Inteligencia de Mercado para Forex
+
+> ⚠️ **DOCUMENTO OBSOLETO (v1.2, CLI-based).** A partir de v3.0 el protocolo de
+> agentes vive en `docs/AGENT_PROTOCOL.json` (formato portable, consumido por
+> `agents/model_router.py` + OpenRouter). Este archivo se conserva como
+> referencia histórica del diseño Claude Code CLI hasta que termine la migración
+> (ver `docs/ROADMAP_FASES_2_8.md`). No editar este archivo — cambios a prompts
+> se hacen en `.claude/agents/*.md` y se re-exportan con
+> `python scripts/export_prompts.py`.
+
 > Versión: 2.0 | Última actualización: 2026-04-19 | Schema: D001-D015
 > Fuente de verdad de decisiones: `Essence/06_DECISIONES.txt`
 

@@ -1,0 +1,55 @@
+# Aetheer v3.0 — feature flags para migración gradual (D011-D015 preservados).
+#
+# Filosofía: "big bang" migrations rompen producción. Cada capa de v3 empieza
+# OFF por defecto; el trader la activa cuando confía en ella.
+#
+# Flags se leen en caliente — no requieren reinicio del orquestador (Fase 2
+# agrega `FeatureFlagsLoader` con filesystem-watch).
+
+version: 1
+
+# --- Fase 1 (implementado hoy) --------------------------------------------
+openrouter:
+  # Si false, los agentes siguen usando Claude Code CLI + subagentes .md
+  # (arquitectura v1.2). Cuando un agente se migra a v3, flipeamos a true
+  # SOLO para ese agente.
+  use_openrouter_by_agent:
+    context-orchestrator: false
+    liquidity: false
+    events: false
+    price-behavior: false
+    macro: false
+    synthesis: false
+    governor: false
+
+cost_monitor:
+  enabled: true
+  alert_sink: "logger"          # "logger" | "telegram" (Fase 6)
+
+# --- Fase 2 (pendiente) ----------------------------------------------------
+cognitive_agent:
+  enable_reflection_loop: false
+  max_trajectory_length: 8
+
+# --- Fase 3 (pendiente) ----------------------------------------------------
+cdp_drawing:
+  enabled: false                # opt-in explícito del trader
+  require_user_consent: true    # prompt la primera vez
+  max_drawings_per_analysis: 10
+  auto_rollback_on_error: true
+
+# --- Fase 4 (pendiente) ----------------------------------------------------
+memory:
+  enable_trajectory_learning: false
+  enable_similar_case_retrieval: false
+
+# --- Fase 5 (pendiente) ----------------------------------------------------
+scheduler:
+  enabled: false
+  timezone: "UTC"
+
+# --- Fase 6 (pendiente) ----------------------------------------------------
+interfaces:
+  webapp_enabled: false
+  telegram_enabled: false
+  sync_via_redis: false
