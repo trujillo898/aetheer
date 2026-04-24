@@ -8,10 +8,12 @@ Dos modos:
 
 Requiere:
   - TV Desktop corriendo con --remote-debugging-port=9222
-  - Para deep_read: 3 tabs → Tab 0=TVC:DXY, Tab 1=OANDA:EURUSD, Tab 2=OANDA:GBPUSD
-  - Indicador Aetheer (D009) cargado en cada tab para deep_read
+  - Un chart activo (el que sea) con el indicador Aetheer (D009) aplicado.
+    El indicador se mantiene al cambiar de símbolo (comportamiento nativo TV).
+  - Para deep_read: set_symbol secuencial sobre ese chart único + guard.
 
-Reemplaza la implementación anterior basada en subprocess Node.js.
+Reemplaza la implementación anterior basada en subprocess Node.js y la
+arquitectura multi-tab (eliminada 2026-04-21 por cross-contamination recurrente).
 """
 
 import asyncio
@@ -32,12 +34,16 @@ logger = logging.getLogger("aetheer.tv_market_reader")
 
 _DB_PATH = Path(__file__).resolve().parent.parent.parent / "db" / "aetheer.db"
 
-# Configuración de tabs — DEBE coincidir con el setup del trader en TradingView
-TAB_CONFIG = {
-    "DXY":    {"index": 0, "symbol": "TVC:DXY"},
-    "EURUSD": {"index": 1, "symbol": "OANDA:EURUSD"},
-    "GBPUSD": {"index": 2, "symbol": "OANDA:GBPUSD"},
+# Mapeo instrumento → símbolo TV. deep_read los recorre con set_symbol
+# secuencial sobre el chart activo (ya no hay multi-tab).
+SYMBOL_CONFIG: dict[str, str] = {
+    "DXY":    "TVC:DXY",
+    "EURUSD": "OANDA:EURUSD",
+    "GBPUSD": "OANDA:GBPUSD",
 }
+
+# Pares candidatos para restore post-deep_read (operables intradía).
+RESTORE_CANDIDATES = ["EURUSD", "GBPUSD"]
 
 # Valores de timeframe para la API de TradingView
 TF_MAP = {
@@ -146,38 +152,37 @@ async def deep_read(tabs_to_read: list[str], intention: str) -> dict:
     timeframes = TF_PROFILES.get(intention, ["H1", "M15"])
     tf_values = [TF_MAP[tf] for tf in timeframes if tf in TF_MAP]
 
-    tabs_config = {
-        name: TAB_CONFIG[name]["index"]
+    symbols_config = {
+        name: SYMBOL_CONFIG[name]
         for name in tabs_to_read
-        if name in TAB_CONFIG
+        if name in SYMBOL_CONFIG
     }
 
-    if not tabs_config:
-        return {"error": f"Ningún tab reconocido en: {tabs_to_read}"}
+    if not symbols_config:
+        return {"error": f"Ningún símbolo reconocido en: {tabs_to_read}"}
 
-    # Delegar al TVCommands.deep_read (maneja restore internamente)
-    raw = await tv.deep_read(tabs_config=tabs_config, timeframes=tf_values)
+    # Fase 1: deep_read sin restore (lo haremos nosotros con la elección limpia)
+    raw = await tv.deep_read(
+        symbols_config=symbols_config,
+        timeframes=tf_values,
+        restore_to_symbol=None,  # default: restaurar al original; se sobreescribe abajo
+    )
 
-    # Post-procesar: parsear indicador Aetheer y validar
-    results = {}
+    # Fase 2: post-procesar, parsear Aetheer, validar
+    results: dict = {}
     for symbol_name, tf_data in raw.items():
         results[symbol_name] = {}
-        tab_cfg = TAB_CONFIG.get(symbol_name, {})
+        tv_symbol_full = SYMBOL_CONFIG.get(symbol_name, "")
+        expected_sym = tv_symbol_full.split(":")[-1]
 
         for tf_val, data in tf_data.items():
             if not isinstance(data, dict) or "error" in data:
                 results[symbol_name][tf_val] = data
                 continue
 
-            # Parsear Pine tables del indicador Aetheer
             aetheer_raw = data.get("aetheer")
             if aetheer_raw:
                 parsed = parse_aetheer_table(aetheer_raw)
-                expected_sym = tab_cfg.get("symbol", "").split(":")[-1]
-                # TF inverso (tf_val "D" → "D1", "240" → "H4", etc.)
-                tf_inv = {v: k for k, v in TF_MAP.items()}
-                expected_tf_name = tf_inv.get(tf_val, tf_val)
-
                 validation = validate_aetheer_data(
                     parsed,
                     expected_symbol=expected_sym,
@@ -194,9 +199,74 @@ async def deep_read(tabs_to_read: list[str], intention: str) -> dict:
             data["from_cache"] = False
 
             results[symbol_name][tf_val] = data
-            _save_deep_snapshot(symbol_name, tf_val, data)
+            # Solo persistir lecturas verificadas: evita envenenar cache con
+            # OHLCV/Aetheer cross-contaminado cuando el chart hizo drift de
+            # símbolo (ver guards en tv_commands.deep_read).
+            if data.get("symbol_verified", True) and "error" not in data:
+                _save_deep_snapshot(symbol_name, tf_val, data)
+
+    # Fase 3: elegir pair más limpio y dejar el chart ahí (si aplica)
+    try:
+        winner = _choose_cleaner_pair(results)
+        winner_tv_symbol = SYMBOL_CONFIG.get(winner)
+        if winner_tv_symbol:
+            current_state = await tv.get_chart_state()
+            current_symbol = (current_state or {}).get("symbol") or ""
+            if current_symbol.upper() != winner_tv_symbol.upper():
+                await tv.set_symbol(winner_tv_symbol)
+                logger.info(f"deep_read restore: chart dejado en {winner_tv_symbol} (pair más limpio)")
+    except Exception as e:
+        logger.warning(f"deep_read restore heuristic falló: {e}")
 
     return results
+
+
+def _choose_cleaner_pair(results: dict) -> str:
+    """Heurística: elige el par (EURUSD|GBPUSD) con estructura más limpia
+    para que el trader opere la sesión.
+
+    Scoring (menor = más limpio), evaluado sobre el indicador Aetheer en H1:
+      - ema_align == "mixed"              → +3 (estructura rota)
+      - price_phase == "expansion"        → +2 (ruptura ya hecha, más ruido)
+      - price_phase == "transition"       → +1
+      - price_phase == "compression"      → 0  (ideal: acumulación pre-ruptura)
+      - rsi_div in {bull_div, bear_div}   → +1 (divergencia añade ambigüedad)
+
+    Fallbacks:
+      - Si Aetheer está ausente en H1, usa M15.
+      - Si ambos pairs carecen de Aetheer, default EURUSD (mayor liquidez
+        durante overlap London-NY).
+      - Si solo un candidato tiene datos utilizables, ese gana.
+    """
+    scores: dict[str, float] = {}
+    for pair in RESTORE_CANDIDATES:
+        if pair not in results:
+            continue
+        tf_data = results[pair]
+        aetheer = None
+        for tf_pref in ("60", "15"):  # H1, luego M15
+            block = tf_data.get(tf_pref)
+            if isinstance(block, dict) and block.get("aetheer_valid"):
+                aetheer = block.get("aetheer_indicator")
+                if aetheer:
+                    break
+        if not aetheer:
+            continue
+        s = 0.0
+        if aetheer.get("ema_align") == "mixed":
+            s += 3
+        phase = aetheer.get("price_phase")
+        if phase == "expansion":
+            s += 2
+        elif phase == "transition":
+            s += 1
+        if aetheer.get("rsi_div") in ("bull_div", "bear_div"):
+            s += 1
+        scores[pair] = s
+
+    if not scores:
+        return "EURUSD"
+    return min(scores, key=scores.get)
 
 
 # ── CACHE SQLITE ──────────────────────────────────────────────────────────────

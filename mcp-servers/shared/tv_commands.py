@@ -1,15 +1,17 @@
 """
 tv_commands.py — Comandos de TradingView para Aetheer.
 
-Implementa las ~10 operaciones que Aetheer necesita usando TVBridge (CDP).
+Implementa las operaciones que Aetheer necesita usando TVBridge (CDP).
 Los snippets de JavaScript fueron extraídos de tradingview-mcp (MIT License),
 ubicado en ~/tradingview-mcp/src/core/*.js.
+
+Modelo: un solo chart activo. Lectura multi-símbolo se hace con set_symbol
+secuencial + guard de verificación. Multi-tab fue eliminado (2026-04-21).
 
 Archivos fuente de referencia:
   connection.js  → CHART_API, BARS_PATH, safeString()
   chart.js       → getState, setTimeframe, setSymbol
   data.js        → getQuote, getOhlcv, getStudyValues, getPineTables
-  tab.js         → list, switchTab
   health.js      → healthCheck, launch
   wait.js        → waitForChartReady
 """
@@ -17,7 +19,6 @@ Archivos fuente de referencia:
 import asyncio
 import json
 import logging
-import re
 import time
 from typing import Any, Optional
 
@@ -278,7 +279,15 @@ class TVCommands:
         return {"success": True, "study_count": len(data or []), "studies": data or []}
 
     async def get_pine_tables(self, study_filter: Optional[str] = None) -> dict:
-        """Tablas de indicadores Pine Script custom (de data.js getPineTables).
+        """Datos expuestos por indicadores Pine Script custom.
+
+        Extrae dos tipos de payloads:
+          1. Tableceldas visibles (`dwgtablecells`) — tabla renderizada en pantalla.
+          2. Texto de labels invisibles (`dwglabels`) — usado por indicadores
+             como Aetheer v1.2.0 que emiten el payload completo como JSON en
+             un label con `style=label.style_none` para rendimiento (sin pintar
+             tabla). Este path se añadió en 2026-04-22 tras confirmarse que
+             el extractor anterior retornaba `study_count=0` para Aetheer.
 
         Args:
             study_filter: Nombre del indicador a filtrar (e.g., "Aetheer").
@@ -303,8 +312,10 @@ class TVCommands:
                         if (filter && name.indexOf(filter) === -1) continue;
                         var g = s._graphics;
                         if (!g || !g._primitivesCollection) continue;
-                        var pc    = g._primitivesCollection;
-                        var items = [];
+                        var pc     = g._primitivesCollection;
+                        var items  = [];
+                        var labels = [];
+                        // 1) Tableceldas visibles
                         try {{
                             var tcOuter = pc.dwgtablecells;
                             if (tcOuter) {{
@@ -317,8 +328,35 @@ class TVCommands:
                                 }}
                             }}
                         }} catch(e) {{}}
-                        if (items.length > 0)
-                            results.push({{name: name, count: items.length, items: items}});
+                        // 2) Texto de labels (payloads JSON de indicadores como Aetheer)
+                        try {{
+                            var lblOuter = pc.dwglabels;
+                            if (lblOuter && typeof lblOuter.get === 'function') {{
+                                var inner = lblOuter.get('labels');
+                                if (inner && inner.forEach) {{
+                                    inner.forEach(function(ival) {{
+                                        if (!ival || !ival._primitivesDataById) return;
+                                        ival._primitivesDataById.forEach(function(pv, pk) {{
+                                            if (!pv) return;
+                                            var txt = (pv.t !== undefined) ? pv.t
+                                                   : (pv.text !== undefined) ? pv.text
+                                                   : (pv.data && pv.data.text) ? pv.data.text
+                                                   : null;
+                                            if (txt !== null && txt !== undefined && String(txt).length > 0) {{
+                                                labels.push({{id: String(pk), text: String(txt)}});
+                                            }}
+                                        }});
+                                    }});
+                                }}
+                            }}
+                        }} catch(e) {{}}
+                        if (items.length > 0 || labels.length > 0)
+                            results.push({{
+                                name: name,
+                                count: items.length,
+                                items: items,
+                                labels: labels
+                            }});
                     }} catch(e) {{}}
                 }}
                 return results;
@@ -331,6 +369,7 @@ class TVCommands:
 
         studies = []
         for s in raw:
+            # 1) Reconstruir tablas de dwgtablecells
             tables: dict[Any, dict] = {}
             for item in s.get("items", []):
                 v   = item.get("raw", {})
@@ -357,25 +396,39 @@ class TVCommands:
                         formatted.append(row_text)
                 table_list.append({"rows": formatted})
 
-            studies.append({"name": s["name"], "tables": table_list})
+            # 2) Parsear labels: intentar JSON primero; si falla, exponer texto plano
+            label_payloads = []
+            for lbl in s.get("labels", []):
+                txt = lbl.get("text", "")
+                if not txt:
+                    continue
+                entry: dict[str, Any] = {"id": lbl.get("id"), "text": txt}
+                try:
+                    parsed = json.loads(txt)
+                    if isinstance(parsed, dict):
+                        entry["json"] = parsed
+                except (json.JSONDecodeError, ValueError):
+                    pass
+                label_payloads.append(entry)
+
+            studies.append({
+                "name": s["name"],
+                "tables": table_list,
+                "labels": label_payloads,
+            })
 
         return {"success": True, "study_count": len(studies), "studies": studies}
 
-    async def get_quote_for_symbol(
-        self,
-        tv_symbol: str,
-        symbol_to_tab: Optional[dict[str, int]] = None,
-    ) -> Optional[dict]:
-        """Quote para un símbolo específico, sin importar qué chart está activo.
+    async def get_quote_for_symbol(self, tv_symbol: str) -> Optional[dict]:
+        """Quote para un símbolo específico usando set_symbol sobre el chart activo.
 
-        Estrategia:
-        1. Fast path: si el chart activo ya muestra ese símbolo → retorna sin cambios.
-        2. Tab switch: si hay un tab mapeado → switch, lee, restaura.
-        3. Set symbol: cambia el símbolo del chart activo, lee, restaura (1 tab basta).
+        Estrategia single-chart (2026-04-21):
+          1. Si el chart activo ya muestra tv_symbol → lee directo, sin tocar.
+          2. Si no → captura el símbolo activo, set_symbol(tv_symbol), verifica
+             que el switch tomó efecto (guard), lee quote, restaura al original.
 
-        Args:
-            tv_symbol: Símbolo TV, e.g. "TVC:DXY", "OANDA:EURUSD"
-            symbol_to_tab: {"TVC:DXY": 0, "OANDA:EURUSD": 1} — opcional
+        Retorna None si la verificación post-switch falla (evita contaminar
+        caches con bars del símbolo equivocado).
         """
         active_symbol = ""
         try:
@@ -386,53 +439,29 @@ class TVCommands:
         except Exception as e:
             logger.debug(f"get_quote_for_symbol: get_chart_state falló: {e}")
 
-        # Intentar tab switch si hay mapping — verificar símbolo después del switch
-        if symbol_to_tab:
-            tab_index = None
-            for sym, idx in symbol_to_tab.items():
-                if sym.upper() == tv_symbol.upper():
-                    tab_index = idx
-                    break
-
-            if tab_index is not None:
-                original_tab_index = None
-                for sym, idx in symbol_to_tab.items():
-                    if sym.upper() == active_symbol:
-                        original_tab_index = idx
-                        break
-
-                switched_ok = False
-                try:
-                    await self.tab_switch(tab_index)
-                    # Verificar que el tab realmente muestra el símbolo pedido
-                    post_state = await self.get_chart_state()
-                    post_symbol = (post_state.get("symbol") or "").upper()
-                    if post_symbol == tv_symbol.upper():
-                        switched_ok = True
-                        result = await self.get_quote()
-                        return result
-                except Exception as e:
-                    logger.warning(f"get_quote_for_symbol: tab switch a {tab_index} falló: {e}")
-                finally:
-                    if switched_ok and original_tab_index is not None and original_tab_index != tab_index:
-                        try:
-                            await self.tab_switch(original_tab_index)
-                        except Exception as e:
-                            logger.warning(f"get_quote_for_symbol: restaurar tab {original_tab_index} falló: {e}")
-
-        # Fallback: set_symbol en chart activo, leer, restaurar símbolo original
+        result: Optional[dict] = None
+        switched = False
         try:
             await self.set_symbol(tv_symbol)
+            post_state = await self.get_chart_state()
+            post_symbol = (post_state.get("symbol") or "").upper()
+            if post_symbol != tv_symbol.upper():
+                logger.error(
+                    f"get_quote_for_symbol: set_symbol({tv_symbol}) no tomó efecto "
+                    f"(chart aún en {post_symbol}) — abortando lectura"
+                )
+                return None
+            switched = True
             result = await self.get_quote()
         except Exception as e:
             logger.warning(f"get_quote_for_symbol: set_symbol({tv_symbol}) falló: {e}")
             result = None
         finally:
-            if active_symbol:
+            if switched and active_symbol and active_symbol != tv_symbol.upper():
                 try:
                     await self.set_symbol(active_symbol)
                 except Exception as e:
-                    logger.warning(f"get_quote_for_symbol: restaurar símbolo {active_symbol} falló: {e}")
+                    logger.warning(f"get_quote_for_symbol: restaurar {active_symbol} falló: {e}")
         return result
 
     # ── NAVEGACIÓN ────────────────────────────────────────────────────────────
@@ -524,126 +553,110 @@ class TVCommands:
 
         return False
 
-    # ── TABS ──────────────────────────────────────────────────────────────────
-
-    async def tab_list(self) -> dict:
-        """Listar tabs abiertos en TradingView Desktop (de tab.js list)."""
-        targets = await self.bridge.get_all_targets()
-        chart_re = re.compile(r"tradingview\.com/chart", re.IGNORECASE)
-        chart_id_re = re.compile(r"/chart/([^/?]+)")
-
-        tabs = []
-        for i, t in enumerate(targets):
-            if t.get("type") != "page":
-                continue
-            url = t.get("url", "")
-            if not chart_re.search(url):
-                continue
-            title = re.sub(r"^Live stock.*charts on ", "", t.get("title", ""))
-            match = chart_id_re.search(url)
-            tabs.append(
-                {
-                    "index": i,
-                    "id": t["id"],
-                    "title": title,
-                    "url": url,
-                    "chart_id": match.group(1) if match else None,
-                }
-            )
-
-        return {"success": True, "tab_count": len(tabs), "tabs": tabs}
-
-    async def tab_switch(self, index: int) -> bool:
-        """Cambiar al tab por índice y reconectar WebSocket (de tab.js switchTab).
-
-        Usa `json/activate/{id}` vía HTTP + reconexión WebSocket al nuevo target.
-        """
-        async with self._nav_lock:
-            tab_result = await self.tab_list()
-            tabs = tab_result.get("tabs", [])
-
-            if index >= len(tabs):
-                raise ValueError(
-                    f"Tab index {index} out of range (hay {len(tabs)} tabs)"
-                )
-
-            target_id = tabs[index]["id"]
-
-            ok = await self.bridge.activate_target(target_id)
-            if not ok:
-                raise RuntimeError(f"No se pudo activar tab {index} (id={target_id})")
-
-            # Reconectar WebSocket al nuevo target activo
-            reconnected = await self.bridge.reconnect_to_active_target()
-            if not reconnected:
-                raise RuntimeError(
-                    f"No se pudo reconectar CDP tras tab switch a índice {index}"
-                )
-
-            await asyncio.sleep(CHART_LOAD_DELAY)
-        return True
-
-    # ── DEEP READ (operación compuesta) ───────────────────────────────────────
+    # ── DEEP READ (operación compuesta, single-chart) ─────────────────────────
 
     async def deep_read(
         self,
-        tabs_config: dict[str, int],
+        symbols_config: dict[str, str],
         timeframes: list[str],
+        restore_to_symbol: Optional[str] = None,
     ) -> dict:
-        """Lectura profunda: itera tabs y timeframes, lee quote + OHLCV + Pine tables.
+        """Lectura profunda sobre un chart único: itera símbolos y timeframes.
 
-        INTERFIERE con el chart del trader (cambia tabs y timeframes).
-        Siempre restaura el estado original, incluso en caso de error.
+        Para cada (símbolo, TF) hace set_symbol + set_timeframe, verifica que
+        el chart efectivamente cambió (guard), y lee quote + OHLCV + Pine tables.
+        Siempre intenta restaurar el estado final al terminar, incluso si hay error.
 
         Args:
-            tabs_config: {"DXY": 0, "EURUSD": 1, "GBPUSD": 2}
-            timeframes: ["D", "240", "60", "15"]  (valores TV)
+            symbols_config: {"DXY": "TVC:DXY", "EURUSD": "OANDA:EURUSD", ...}
+            timeframes: ["D", "240", "60", "15"] (valores TV)
+            restore_to_symbol: TV symbol al que volver al terminar. Si es None,
+                restaura al símbolo activo antes de iniciar (default).
 
         Returns:
             {"DXY": {"D": {...}, "240": {...}}, "EURUSD": {...}, ...}
+            Cada tf_data incluye "symbol_verified" (bool) para que el caller
+            pueda descartar lecturas con guard fallido.
         """
         results: dict = {}
 
-        # Guardar estado original
         try:
             original_state = await self.get_chart_state()
-            original_tf = original_state.get("resolution", "60")
+            original_symbol = (original_state or {}).get("symbol") or ""
+            original_tf = (original_state or {}).get("resolution") or "60"
         except Exception:
-            original_state = None
+            original_symbol = ""
             original_tf = "60"
 
-        original_tab = 0  # Restaurar al tab 0 si no podemos determinar el activo
+        final_restore = restore_to_symbol if restore_to_symbol else original_symbol
 
         try:
-            for symbol_name, tab_index in tabs_config.items():
+            for symbol_name, tv_symbol in symbols_config.items():
                 results[symbol_name] = {}
 
                 try:
-                    await self.tab_switch(tab_index)
+                    await self.set_symbol(tv_symbol)
                 except Exception as e:
-                    results[symbol_name]["tab_error"] = str(e)
-                    logger.warning(f"deep_read: tab_switch({tab_index}) falló: {e}")
+                    results[symbol_name]["symbol_error"] = str(e)
+                    logger.warning(f"deep_read: set_symbol({tv_symbol}) falló: {e}")
                     continue
 
+                # Guard: verificar que el chart realmente cargó el símbolo pedido
                 try:
                     state = await self.get_chart_state()
-                    actual_symbol = state.get("symbol", "") if state else ""
+                    actual_symbol = (state or {}).get("symbol") or ""
                 except Exception:
                     actual_symbol = ""
+
+                if actual_symbol.upper() != tv_symbol.upper():
+                    results[symbol_name]["symbol_error"] = (
+                        f"guard: pedí {tv_symbol} pero chart muestra {actual_symbol!r}"
+                    )
+                    logger.error(
+                        f"deep_read guard: esperaba {tv_symbol}, chart en {actual_symbol} — saltando"
+                    )
+                    continue
 
                 for tf in timeframes:
                     try:
                         await self.set_timeframe(tf)
                     except Exception as e:
                         results[symbol_name][tf] = {
-                            "error": f"set_timeframe({tf}) falló: {e}"
+                            "error": f"set_timeframe({tf}) falló: {e}",
+                            "symbol_verified": False,
                         }
                         continue
 
+                    # Guard post-set_timeframe: el símbolo puede haber cambiado
+                    # entre set_symbol y el final de set_timeframe (race con TV).
+                    # Sin este chequeo, OHLCV y Aetheer se leen del símbolo viejo
+                    # y terminan etiquetados con el nuevo → cross-contamination.
+                    try:
+                        post_state = await self.get_chart_state()
+                        post_symbol = (post_state or {}).get("symbol") or ""
+                    except Exception:
+                        post_symbol = ""
+
+                    if post_symbol.upper() != tv_symbol.upper():
+                        results[symbol_name][tf] = {
+                            "error": (
+                                f"guard post-TF: esperaba {tv_symbol}, "
+                                f"chart drift a {post_symbol!r}"
+                            ),
+                            "symbol_verified": False,
+                        }
+                        logger.error(
+                            f"deep_read TF-guard: {tv_symbol}@{tf} drift a "
+                            f"{post_symbol} — descartando lectura"
+                        )
+                        continue
+
                     tf_data: dict = {
-                        "timeframe":      tf,
-                        "symbol":         symbol_name,
-                        "actual_symbol":  actual_symbol,
+                        "timeframe":       tf,
+                        "symbol":          symbol_name,
+                        "tv_symbol":       tv_symbol,
+                        "actual_symbol":   post_symbol,
+                        "symbol_verified": True,
                     }
 
                     try:
@@ -668,15 +681,41 @@ class TVCommands:
                     except Exception as e:
                         tf_data["studies_error"] = str(e)
 
+                    # Cross-validation: el Pine Aetheer emite SYMBOL en su payload.
+                    # Si no coincide con el esperado → datos contaminados, descartar.
+                    aet_payload = tf_data.get("aetheer") or {}
+                    payload_syms = [
+                        (lbl.get("json") or {}).get("symbol")
+                        for st in aet_payload.get("studies", []) or []
+                        for lbl in st.get("labels", []) or []
+                        if isinstance(lbl.get("json"), dict)
+                    ]
+                    payload_syms = [s for s in payload_syms if s]
+                    if payload_syms:
+                        expected_short = tv_symbol.split(":")[-1].upper()
+                        mismatch = [s for s in payload_syms
+                                    if s.upper() != expected_short]
+                        if mismatch:
+                            tf_data["symbol_verified"] = False
+                            tf_data["aetheer_symbol_mismatch"] = {
+                                "expected": expected_short,
+                                "got": payload_syms,
+                            }
+                            logger.error(
+                                f"deep_read payload-guard: {tv_symbol}@{tf} "
+                                f"Aetheer reporta {payload_syms}, esperaba "
+                                f"{expected_short} — marcando unverified"
+                            )
+
                     results[symbol_name][tf] = tf_data
 
         finally:
-            # SIEMPRE restaurar estado original del trader
             try:
-                await self.tab_switch(original_tab)
+                if final_restore:
+                    await self.set_symbol(final_restore)
                 if original_tf:
                     await self.set_timeframe(str(original_tf))
             except Exception as e:
-                logger.error(f"deep_read: error restaurando estado: {e}")
+                logger.error(f"deep_read: error restaurando chart a {final_restore}: {e}")
 
         return results

@@ -9,11 +9,19 @@ import logging
 logger = logging.getLogger("aetheer.shared.pine_parser")
 
 # Campos obligatorios que el indicador debe retornar
+# Nombres coinciden con las claves del JSON del Pine v1.2.0 tras normalizar
+# a UPPERCASE (el pine emite lowercase).
 REQUIRED_FIELDS = [
     "ATR14", "RSI14", "EMA20", "EMA50", "EMA200",
     "EMA_ALIGN", "SESSION", "PREV_DAY_HIGH", "PREV_DAY_LOW",
-    "SYMBOL", "TF", "VERSION",
+    "SYMBOL", "TIMEFRAME", "AETHEER_VERSION",
 ]
+
+# Alias retro-compatibles (nombres viejos/alternativos → campo canónico)
+FIELD_ALIASES = {
+    "TF": "TIMEFRAME",
+    "VERSION": "AETHEER_VERSION",
+}
 
 # Campos numéricos (para validación de rango)
 NUMERIC_FIELDS = {
@@ -51,46 +59,118 @@ def _parse_value(value: str):
     return v
 
 
+def _normalize_dict_keys_upper(d: dict) -> dict:
+    """Emite el dict con keys en AMBAS cajas (original + UPPERCASE).
+
+    REQUIRED_FIELDS valida contra UPPERCASE, pero hay consumidores
+    (p.ej. tv_market_reader._choose_cleaner_pair) que leen las claves
+    originales del payload Pine (lowercase: ema_align, price_phase,
+    rsi_div). Emitir ambas evita tocar cada consumidor sin perder la
+    garantía de validación UPPERCASE.
+
+    Además publica alias retro-compatibles cortos (VERSION, TF) cuando
+    existe su forma canónica (AETHEER_VERSION, TIMEFRAME).
+    """
+    out: dict = {}
+    for k, v in d.items():
+        original = str(k).strip()
+        upper = original.upper()
+        out[original] = v
+        if upper != original:
+            out[upper] = v
+    for alias, canonical in FIELD_ALIASES.items():
+        if canonical in out and alias not in out:
+            out[alias] = out[canonical]
+    return out
+
+
 def parse_aetheer_table(pine_tables_response: dict) -> dict:
     """Parsea la respuesta de data_get_pine_tables para el indicador Aetheer.
 
-    El formato exacto del response depende del TV MCP. Esta función
-    intenta múltiples formatos conocidos.
+    Intenta múltiples formatos por retrocompatibilidad:
+      0. Labels con JSON embebido (Aetheer v1.2.0+) — formato preferido.
+      1. Tablas renderizadas (dwgtablecells, legacy).
+      2. Array [["KEY", "VALUE"], ...] (formato 2).
+      3. Dict plano con key-value pairs (formato 3).
 
     Args:
         pine_tables_response: Response crudo de data_get_pine_tables.
 
     Returns:
-        Dict con claves del indicador (ATR14, RSI14, EMA_ALIGN, etc.)
+        Dict con claves UPPERCASE del indicador (ATR14, RSI14, EMA_ALIGN, ...).
+        Keys del payload siempre en UPPERCASE para consistencia con REQUIRED_FIELDS
+        independientemente de si el indicador las emite en lower o upper case.
     """
-    result = {}
+    result: dict = {}
 
     if not pine_tables_response:
         return result
 
+    # Formato 0 (preferido, 2026-04+): labels con JSON embebido.
+    # get_pine_tables retorna {success, study_count, studies:[{name, tables, labels}]}
+    studies = pine_tables_response.get("studies")
+    if isinstance(studies, list):
+        for study in studies:
+            for lbl in study.get("labels", []) or []:
+                payload = lbl.get("json")
+                if isinstance(payload, dict) and payload:
+                    result.update(_normalize_dict_keys_upper(payload))
+                    break
+                # fallback: intentar json.loads del texto
+                txt = lbl.get("text")
+                if isinstance(txt, str) and txt.strip().startswith("{"):
+                    import json as _json
+                    try:
+                        parsed = _json.loads(txt)
+                        if isinstance(parsed, dict):
+                            result.update(_normalize_dict_keys_upper(parsed))
+                            break
+                    except (_json.JSONDecodeError, ValueError):
+                        pass
+            if result:
+                break
+
     # Formato 1: { "tables": [{ "rows": [{ "cells": ["KEY", "VALUE"] }] }] }
-    tables = pine_tables_response.get("tables", [])
-    for table in tables:
-        rows = table.get("rows", [])
-        for row in rows:
-            cells = row.get("cells", [])
-            if len(cells) >= 2:
-                key = str(cells[0]).strip()
-                value = str(cells[1]).strip()
-                result[key] = _parse_value(value)
+    if not result:
+        tables = pine_tables_response.get("tables", [])
+        for table in tables:
+            rows = table.get("rows", [])
+            for row in rows:
+                cells = row.get("cells", [])
+                if len(cells) >= 2:
+                    key = str(cells[0]).strip().upper()
+                    value = str(cells[1]).strip()
+                    result[key] = _parse_value(value)
+
+    # Formato 1b: study.tables[].rows = ["KEY | VALUE", ...] (salida de get_pine_tables legacy)
+    if not result and isinstance(studies, list):
+        for study in studies:
+            for table in study.get("tables", []) or []:
+                for row in table.get("rows", []) or []:
+                    if isinstance(row, str) and "|" in row:
+                        parts = [p.strip() for p in row.split("|")]
+                        if len(parts) >= 2 and parts[0]:
+                            result[parts[0].upper()] = _parse_value(parts[1])
 
     # Formato 2: { "data": [["KEY", "VALUE"], ...] }
     if not result:
         data = pine_tables_response.get("data", [])
         for item in data:
             if isinstance(item, (list, tuple)) and len(item) >= 2:
-                result[str(item[0]).strip()] = _parse_value(str(item[1]).strip())
+                key = str(item[0]).strip().upper()
+                result[key] = _parse_value(str(item[1]).strip())
 
-    # Formato 3: respuesta plana con key-value pairs
+    # Formato 3: respuesta plana con key-value pairs (fallback último recurso)
     if not result:
+        skip = {"success", "error", "study_count", "tables", "data", "studies"}
         for key, value in pine_tables_response.items():
-            if key not in ("success", "error", "study_count", "tables", "data"):
-                result[key] = _parse_value(str(value)) if not isinstance(value, (int, float, bool)) else value
+            if key in skip:
+                continue
+            norm_key = str(key).strip().upper()
+            if isinstance(value, (int, float, bool)):
+                result[norm_key] = value
+            else:
+                result[norm_key] = _parse_value(str(value))
 
     return result
 
@@ -125,9 +205,12 @@ def validate_aetheer_data(parsed: dict, expected_symbol: str = "",
         if str(parsed["TF"]) != expected_tf:
             errors.append(f"Timeframe incorrecto: esperaba {expected_tf}, recibió {parsed['TF']}")
 
-    # Verificar versión
-    if parsed.get("VERSION") and str(parsed["VERSION"]) != "1.0":
-        warnings.append(f"Versión inesperada del indicador: {parsed['VERSION']}")
+    # Verificar versión — acepta 1.x.x (indicador actual: 1.2.0)
+    version = parsed.get("VERSION") or parsed.get("AETHEER_VERSION")
+    if version:
+        vstr = str(version)
+        if not vstr.startswith("1."):
+            warnings.append(f"Versión inesperada del indicador: {vstr}")
 
     # Campos obligatorios
     for field in REQUIRED_FIELDS:

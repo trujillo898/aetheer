@@ -20,7 +20,7 @@ if str(_PKG_ROOT) not in sys.path:
     sys.path.insert(0, str(_PKG_ROOT))
 
 from shared.tv_market_reader import (  # noqa: E402
-    TAB_CONFIG,
+    SYMBOL_CONFIG,
     TF_MAP,
     TF_PROFILES,
     deep_read,
@@ -94,16 +94,23 @@ async def get_price(cache: SnapshotCache, instrument: str) -> dict:
     if is_tv_available():
         try:
             tv_symbol = SYMBOL_MAP.get(instrument, instrument)
-            symbol_to_tab = {
-                SYMBOL_MAP[name]: cfg["index"]
-                for name, cfg in TAB_CONFIG.items()
-                if name in SYMBOL_MAP
-            }
-            quote = await get_tv_quote_for_symbol(tv_symbol, symbol_to_tab)
+            quote = await get_tv_quote_for_symbol(tv_symbol)
             price = None
             if quote and quote.get("success"):
                 price = quote.get("close") or quote.get("last")
             if price is not None:
+                # Guard: if the chart returned a different symbol than requested
+                # (tab switch / set_symbol silently failed), refuse to cache.
+                # Prevents cross-contamination where e.g. EURUSD bars get written
+                # under every symbol key.
+                returned_sym = (quote.get("symbol") or "").upper().split(":")[-1]
+                if returned_sym and returned_sym != instrument:
+                    logger.error(
+                        f"symbol mismatch: asked {instrument}, CDP returned {returned_sym} — skipping cache write"
+                    )
+                    raise RuntimeError(
+                        f"symbol mismatch guard: {instrument} vs {returned_sym}"
+                    )
                 payload = {
                     "symbol": instrument,
                     "price": float(price),
@@ -196,8 +203,8 @@ async def get_ohlcv(
     use get_price instead.
     """
     instrument = _normalize_instrument(instrument)
-    if instrument not in TAB_CONFIG:
-        raise ValueError(f"Instrument {instrument} not in TAB_CONFIG (need DXY/EURUSD/GBPUSD tab setup).")
+    if instrument not in SYMBOL_CONFIG:
+        raise ValueError(f"Instrument {instrument} not in SYMBOL_CONFIG (need DXY/EURUSD/GBPUSD).")
     if timeframe not in TF_MAP:
         raise ValueError(f"Unknown timeframe {timeframe}. Use one of {list(TF_MAP)}.")
 
@@ -238,9 +245,18 @@ async def get_ohlcv(
     if "error" in raw:
         raise RuntimeError(f"deep_read error: {raw['error']}")
 
-    tf_block = raw.get(instrument, {}).get(tf_value, {})
+    instrument_block = raw.get(instrument, {})
+    if instrument_block.get("symbol_error"):
+        raise RuntimeError(
+            f"deep_read symbol guard failed for {instrument}: {instrument_block['symbol_error']}"
+        )
+    tf_block = instrument_block.get(tf_value, {})
     if not tf_block or "error" in tf_block:
         raise RuntimeError(f"deep_read did not return {instrument} {timeframe}: {tf_block}")
+    if not tf_block.get("symbol_verified", False):
+        raise RuntimeError(
+            f"deep_read returned unverified data for {instrument} {timeframe} — refusing to cache"
+        )
 
     payload = {
         "symbol": instrument,

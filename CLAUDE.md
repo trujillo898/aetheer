@@ -303,31 +303,39 @@ Aceptación de riesgos (D013): single-vendor dependency sobre APIs no documentad
 El tv-health-monitor (scripts/tv-health-monitor.py) vigila salud y — opcionalmente —
 relanza TV Desktop (ver AETHEER_AUTORESTART / AETHEER_TV_LAUNCH_CMD).
 
-### Lectura Multi-Timeframe (D014)
+### Lectura Multi-Timeframe (D014 — single-chart desde 2026-04-21)
 ```yaml
 modos:
   lectura_rapida:
     duración: "~2-3s"
     interferencia: "ninguna"
-    método: quote_get de 8 símbolos
+    método: quote_get del chart activo + set_symbol sobre pares del basket
     uso: heartbeat, data_point, system_health
-  
+
   lectura_profunda:
-    duración: "~24-30s"
-    interferencia: "temporal_chart_lock"  # Bloquea chart del trader
-    método: Cambiar tabs + timeframes + leer OHLCV + Aetheer indicator
+    duración: "~30-40s"
+    interferencia: "temporal_chart_lock"  # el chart activo cambia de símbolo
+    método: set_symbol + set_timeframe secuencial sobre el chart activo + guard
+            (verifica chart.symbol() tras cada switch, descarta datos sin match)
     setup_requerido:
-      - Tab 0: TVC:DXY + Aetheer Indicator
-      - Tab 1: OANDA:EURUSD + Aetheer Indicator
-      - Tab 2: OANDA:GBPUSD + Aetheer Indicator
+      - Un chart activo en TV Desktop (el que sea — DXY, EURUSD o GBPUSD
+        funcionan como punto de partida)
+      - Indicador Aetheer v1.2.0 aplicado UNA sola vez en ese chart.
+        TV mantiene estudios al cambiar de símbolo, así que no hace falta
+        re-aplicarlo por par. El agente valida presencia de datos Aetheer
+        en tiempo de lectura y degrada quality_score si faltan.
+    restore_post_lectura:
+      - Tras el deep read, el chart queda en el pair (EURUSD|GBPUSD) con
+        estructura más limpia según heurística (ema_align, price_phase, rsi_div).
+      - Default si no hay Aetheer: EURUSD (mayor liquidez overlap London-NY).
     uso: full_analysis, validate_setup
 
 profundidad_por_intención:
-  full_analysis: {tabs: [DXY, EURUSD, GBPUSD], timeframes: [D1,H4,H1,M15], tiempo: "24-30s"}
-  validate_setup: {tabs: [DXY, par], timeframes: [H1,M15], tiempo: "8-10s"}
-  macro_question: {tabs: [DXY], timeframes: [D1,H4], tiempo: "4-6s"}
-  sudden_move: {tabs: [par_afectado], timeframes: [M15,H1], tiempo: "4-6s"}
-  data_point: {tabs: [], timeframes: [], tiempo: "2s"}  # Solo quote
+  full_analysis: {símbolos: [DXY, EURUSD, GBPUSD], timeframes: [D1,H4,H1,M15], tiempo: "30-40s"}
+  validate_setup: {símbolos: [DXY, par], timeframes: [H1,M15], tiempo: "10-14s"}
+  macro_question: {símbolos: [DXY], timeframes: [D1,H4], tiempo: "6-8s"}
+  sudden_move: {símbolos: [par_afectado], timeframes: [M15,H1], tiempo: "6-8s"}
+  data_point: {símbolos: [], timeframes: [], tiempo: "2s"}  # Solo quote del activo
 ```
 
 ---

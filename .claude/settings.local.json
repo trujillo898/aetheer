@@ -56,7 +56,14 @@
       "Bash(dpkg -l)",
       "mcp__memory__get_current_time",
       "mcp__price-feed__read_market_data_tool",
-      "Bash(sqlite3 *)"
+      "Bash(sqlite3 *)",
+      "mcp__tv-unified__get_system_health",
+      "mcp__tv-unified__get_economic_calendar_tool",
+      "mcp__tv-unified__get_news_tool",
+      "mcp__memory__detect_regime",
+      "mcp__memory__get_recent_trades",
+      "mcp__tv-unified__get_price_tool",
+      "mcp__tv-unified__get_correlations_tool"
     ]
   },
   "enabledMcpjsonServers": [

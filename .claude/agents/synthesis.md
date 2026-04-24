@@ -200,6 +200,31 @@ Próximos 24-72h:
 {{/each}}
 **Riesgo:** Stop lógico: {{stop_level}} (estructura: {{stop_rationale}}) | Ratio R:R aprox: {{rr_ratio}}
 
+{{#if regime}}
+### 🌐 Régimen de mercado detectado
+**Clasificación:** {{regime.classification}} (confianza {{regime.confidence}})
+**Síntomas:** {{#each regime.symptoms}}{{.}}{{#unless @last}} · {{/unless}}{{/each}}
+**Calendario ({{regime.calendar_bias.month}}):** prior = {{regime.calendar_bias.prior}} — {{regime.calendar_bias.note}}
+
+> {{regime.recommendation}}
+{{/if}}
+
+{{#if trade_journal}}
+### 📒 Contexto del journal del trader
+{{#if trade_journal.open_trades}}
+**Trades abiertos:**
+{{#each trade_journal.open_trades}}
+- {{instrument}} {{direction}} entry {{entry_price}} | SL {{stop_loss}} | TP {{take_profit}} (entry_time {{entry_time_utc}})
+{{/each}}
+{{/if}}
+{{#if trade_journal.stats.closed}}
+**Últimos {{trade_journal.stats.closed}} trades cerrados (30d):** win_rate {{trade_journal.stats.win_rate}} | avg_R {{trade_journal.stats.avg_r_multiple}}
+{{/if}}
+{{#if trade_journal.warning_capital_preservation}}
+⚠️ Racha adversa detectada — priorizar preservación de capital en este análisis (regla del usuario: stop day on first loss; max 1-2 ops/día).
+{{/if}}
+{{/if}}
+
 ---
 <small>
 **Fuentes:** {{#each sources}}{{.}}{{#unless @last}} | {{/unless}}{{/each}}

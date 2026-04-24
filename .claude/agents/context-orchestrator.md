@@ -42,6 +42,34 @@ Tu objetivo: maximizar señal, minimizar ruido, respetar budgets y Operating Mod
    - Usar `relevance_threshold = 0.3` por defecto
    - Si tv-unified reporta múltiples fuentes stale → subir a 0.5 para reducir carga
 
+3a. **Detectar régimen de mercado** (intent ∈ {full_analysis, validate_setup})
+   - Llamar `mcp__memory__detect_regime` pasando aetheer_per_pair (de la lectura deep).
+   - Inyectar en TODOS los packages (price_behavior, liquidity, events, macro, synthesis):
+     * `regime.classification` (trending|transition|ranging)
+     * `regime.confidence` (0-1)
+     * `regime.symptoms` (lista, expone evidencia)
+     * `regime.recommendation` (texto operativo)
+     * `regime.calendar_bias` (priors mensuales)
+   - Si `regime == "transition"` AND `confidence >= 0.6`:
+     * Marcar alert: `{"level": "warning", "code": "REGIME_TRANSITION", "recommendation": "..."}`
+     * Synthesis DEBE exponer la advertencia al usuario antes del veredicto operativo
+   - Si conflicto entre régimen detectado y bias del análisis (ej. trending detectado pero
+     macro bias mixto): governor debe registrar como contradicción de severidad medium.
+
+3b. **Consultar trade journal** (intent ∈ {full_analysis, validate_setup, punctual-sobre-par})
+   - Llamar `mcp__memory__get_recent_trades` con:
+     * `instrument` = par consultado (o vacío para full_analysis)
+     * `days_back` = 30, `limit` = 20, `include_open` = true
+   - Inyectar resumen en packages.synthesis:
+     * `trade_journal.stats` (win_rate, avg_r, racha actual)
+     * `trade_journal.open_trades` (trades abiertos: expose a synthesis para contexto operativo)
+     * `trade_journal.recent_losses` (últimos 3 loss si win_rate < 0.4 → alerta de preservación de capital)
+   - Inyectar en packages.price_behavior:
+     * Trades recientes del mismo par para detectar patrones repetidos (mismo setup fallando 2+ veces)
+   - Si hay trade abierto activo y consulta es punctual sobre el mismo par:
+     * `priority: "urgent"` en synthesis
+     * Añadir alert: `{"level": "info", "code": "OPEN_TRADE_CONTEXT", "trade_id": N}`
+
 4. **Evaluar necesidad de bridge_summary** (si gap > 4 horas desde última interacción)
    ```python
    # Lógica explícita:
