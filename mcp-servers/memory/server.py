@@ -64,7 +64,7 @@ VALID_TABLES = {
 }
 
 
-@mcp.tool()
+@mcp.tool(name="memory_store")
 async def store(table: str, data: str, ttl_days: int = 30) -> str:
     """Store data in a database table.
 
@@ -95,7 +95,7 @@ async def store(table: str, data: str, ttl_days: int = 30) -> str:
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
+@mcp.tool(name="memory_query")
 async def query(table: str, filters: str = "{}", limit: int = 20, order: str = "recent") -> str:
     """Query data from a database table.
 
@@ -365,7 +365,7 @@ async def get_system_health() -> str:
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
+@mcp.tool(name="memory_get_current_time")
 async def get_current_time(compact: bool = False) -> str:
     """Get current date, time, active Forex sessions, and market status.
 
@@ -648,7 +648,7 @@ async def record_causal_chain(chain: str) -> str:
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
+@mcp.tool(name="memory_validate_causal_chains")
 async def validate_causal_chains(market_snapshot_json: str = "{}") -> str:
     """Loop de validación: recorre chains 'open', evalúa triggers, ajusta confidence.
 
@@ -822,7 +822,7 @@ async def get_causal_chains_stats(days_back: int = 30) -> str:
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
+@mcp.tool(name="memory_detect_regime")
 async def detect_regime(
     aetheer_per_pair_json: str = "{}",
     use_recent_trades: bool = True,
@@ -891,7 +891,7 @@ async def detect_regime(
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
+@mcp.tool(name="memory_get_recent_trades")
 async def get_recent_trades(
     instrument: str = "",
     outcome: str = "",

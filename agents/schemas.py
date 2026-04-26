@@ -66,6 +66,23 @@ def _weighted_global(
     return max(0.0, min(1.0, round(raw, 4)))
 
 
+class AttentionContext(BaseModel):
+    """Output of the Attention Mechanism: dominant theme and per-agent weights."""
+    model_config = ConfigDict(extra="forbid")
+
+    dominant_theme: str = Field(description="The primary driver of the market right now (e.g. 'fed_policy', 'geopolitics')")
+    attention_weights: dict[str, float] = Field(description="Weights per specialist agent [0..1]")
+    reasoning: str = Field(description="Brief explanation of why this theme is dominant")
+
+class RegimeInfo(BaseModel):
+    """Market regime classification used for causal grounding."""
+    model_config = ConfigDict(extra="forbid")
+
+    classification: Literal["trending", "ranging", "transition"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    symptoms: list[str] = Field(default_factory=list)
+    recommendation: str | None = None
+
 class CognitiveQuery(BaseModel):
     """Inbound request to the cognitive agent."""
 
@@ -77,6 +94,8 @@ class CognitiveQuery(BaseModel):
     timeframes: list[Timeframe] = Field(default_factory=list)
     requested_by: RequestedBy
     trace_id: str = Field(min_length=1)
+    # Optional override for attention if pre-calculated
+    attention_override: AttentionContext | None = None
 
 
 class ExecutionMeta(BaseModel):
@@ -207,6 +226,8 @@ class CognitiveResponse(BaseModel):
     quality: QualityBreakdown
     causal_chains: list[CausalChain] = Field(default_factory=list)
     contradictions: list[Contradiction] = Field(default_factory=list)
+    attention: AttentionContext | None = None
+    regime: RegimeInfo | None = None
     rejection_reason: str | None = None
     synthesis_text: str | None = None
     cost_usd: float = Field(default=0.0, ge=0.0)
@@ -243,4 +264,6 @@ __all__ = [
     "AgentOutput",
     "GovernorDecision",
     "CognitiveResponse",
+    "AttentionContext",
+    "RegimeInfo",
 ]

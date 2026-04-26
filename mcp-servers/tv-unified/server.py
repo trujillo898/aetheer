@@ -121,7 +121,7 @@ def _err(msg: str, **extra) -> str:
 # ─────────────────────────── TOOLS ───────────────────────────
 
 
-@mcp.tool()
+@mcp.tool(name="tv_get_price")
 async def get_price_tool(instrument: str) -> str:
     """Current price for DXY/EURUSD/GBPUSD/etc. via TradingView CDP.
 
@@ -137,7 +137,7 @@ async def get_price_tool(instrument: str) -> str:
         return _err(str(e), instrument=instrument)
 
 
-@mcp.tool()
+@mcp.tool(name="tv_get_ohlcv")
 async def get_ohlcv_tool(
     instrument: str, timeframe: str = "H1", intention: str = "full_analysis"
 ) -> str:
@@ -160,7 +160,7 @@ async def get_ohlcv_tool(
         return _err(str(e), instrument=instrument, timeframe=timeframe)
 
 
-@mcp.tool()
+@mcp.tool(name="tv_get_correlations")
 async def get_correlations_tool() -> str:
     """Correlation basket (DXY + EURUSD + GBPUSD + XAUUSD + VIX + SPX + US10Y + US02Y)."""
     try:
@@ -172,7 +172,7 @@ async def get_correlations_tool() -> str:
         return _err(str(e))
 
 
-@mcp.tool()
+@mcp.tool(name="tv_get_chart_indicators")
 async def get_chart_indicators_tool(instrument: str, timeframe: str = "H1") -> str:
     """Read Aetheer indicator JSON from the TradingView label.
 
@@ -189,7 +189,7 @@ async def get_chart_indicators_tool(instrument: str, timeframe: str = "H1") -> s
         return _err(str(e), instrument=instrument, timeframe=timeframe)
 
 
-@mcp.tool()
+@mcp.tool(name="tv_get_news")
 async def get_news_tool(
     symbol: str = "",
     category: str = "forex",
@@ -217,7 +217,7 @@ async def get_news_tool(
         return _err(str(e))
 
 
-@mcp.tool()
+@mcp.tool(name="tv_get_economic_calendar")
 async def get_economic_calendar_tool(
     countries: str = "US,EU,GB",
     from_date: str = "",
@@ -247,7 +247,7 @@ async def get_economic_calendar_tool(
         return _err(str(e))
 
 
-@mcp.tool()
+@mcp.tool(name="tv_get_system_health")
 async def get_system_health() -> str:
     """Unified health report: CDP + news API + calendar API + cache fallback.
 

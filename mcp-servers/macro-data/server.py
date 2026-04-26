@@ -99,7 +99,7 @@ def _get_last_known_fedwatch(max_age_hours: int = 168) -> dict | None:
     return None
 
 
-@mcp.tool()
+@mcp.tool(name="macro_get_fed_watch")
 async def get_fed_watch() -> str:
     """Get CME FedWatch Tool probabilities for the next Fed meeting.
 
@@ -207,7 +207,7 @@ async def get_fed_watch() -> str:
     return resp_str
 
 
-@mcp.tool()
+@mcp.tool(name="macro_update_fedwatch_manual")
 async def update_fedwatch_manual(
     hold: float | None = None,
     cut_25bp: float | None = None,
@@ -258,7 +258,7 @@ async def update_fedwatch_manual(
     })
 
 
-@mcp.tool()
+@mcp.tool(name="macro_get_yields")
 async def get_yields_data() -> str:
     """Get 10-year bond yields for US Treasury, German Bund, and UK Gilt.
 
@@ -274,7 +274,7 @@ async def get_yields_data() -> str:
     return result
 
 
-@mcp.tool()
+@mcp.tool(name="macro_get_indicator")
 async def get_macro_indicators(country: str, indicator: str) -> str:
     """Get a macro-economic indicator value.
 
@@ -294,7 +294,7 @@ async def get_macro_indicators(country: str, indicator: str) -> str:
     return result
 
 
-@mcp.tool()
+@mcp.tool(name="macro_get_correlations")
 async def get_correlations_data() -> str:
     """Get correlation assets: Gold (XAU/USD), VIX, S&P 500, WTI Crude.
 

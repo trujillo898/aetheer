@@ -173,6 +173,23 @@ _MEMORY_TOOLS: dict[str, ToolDef] = {
         "of guessing dates/days/sessions.",
         {"compact": {"type": "boolean", "default": False}},
     ),
+    "memory_detect_regime": _fn(
+        "memory_detect_regime",
+        "Classify the current market regime: trending|transition|ranging. "
+        "Combines Aetheer indicators + user trade history + calendar priors.",
+        {
+            "aetheer_per_pair_json": {"type": "string", "description": "JSON string {pair: {tf: aetheer_data}}", "default": "{}"},
+            "use_recent_trades": {"type": "boolean", "default": True},
+        },
+    ),
+    "memory_get_recent_trades": _fn(
+        "memory_get_recent_trades",
+        "Get recent user trades to inform analysis (win rate, streaks, patterns).",
+        {
+            "instrument": {"type": "string", "default": ""},
+            "limit": {"type": "integer", "default": 20},
+        },
+    ),
     "memory_validate_causal_chains": _fn(
         "memory_validate_causal_chains",
         "Validate proposed causal chains against historical similar cases.",
@@ -196,6 +213,8 @@ _AGENT_TOOL_NAMES: dict[str, tuple[str, ...]] = {
         "tv_get_system_health",
         "memory_query",
         "memory_get_current_time",
+        "memory_detect_regime",
+        "memory_get_recent_trades",
     ),
     "liquidity": (
         "tv_get_price",
@@ -218,6 +237,7 @@ _AGENT_TOOL_NAMES: dict[str, tuple[str, ...]] = {
         "memory_query",
         "memory_get_current_time",
         "memory_validate_causal_chains",
+        "memory_detect_regime",
     ),
     "macro": (
         "macro_get_fed_watch",
@@ -227,6 +247,7 @@ _AGENT_TOOL_NAMES: dict[str, tuple[str, ...]] = {
         "tv_get_news",
         "memory_query",
         "memory_get_current_time",
+        "memory_detect_regime",
     ),
     "synthesis": (),
     "governor": (),

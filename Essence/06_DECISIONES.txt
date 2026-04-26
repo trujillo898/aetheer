@@ -438,3 +438,27 @@ IMPLEMENTACIÓN IDEAL: versionado estricto con tests de regresión numérica
 ESTADO: implementado
 
 
+
+DECISIÓN: Implementación de Attention Mechanism (Bloque 3)
+FECHA: 2026-04-26
+MOTIVACIÓN: Necesidad de enfocar el análisis en temas relevantes y optimizar costos.
+CONTEXTO: El sistema realizaba un fan-out fijo a todos los agentes sin considerar el foco del mercado.
+SOLUCIÓN: Crear AttentionAgent que analiza noticias/precios antes del fan-out y asigna pesos.
+CONSECUENCIA: Mejora en la relevancia del análisis y reducción de costos al usar modelos NANO para agentes con baja atención.
+ESTADO: implementado
+
+DECISIÓN: Integración de Regime Detection (Bloque 4)
+FECHA: 2026-04-26
+MOTIVACIÓN: Grounding causal dependiente del régimen de mercado (trending vs ranging).
+CONTEXTO: La herramienta existía en MCP pero no se usaba en el flujo cognitivo principal.
+SOLUCIÓN: Integrar llamada a memory_detect_regime en el orquestador y propagar a especialistas.
+CONSECUENCIA: Especialistas ahora ajustan sus cadenas causales según el régimen detectado.
+ESTADO: implementado
+
+DECISIÓN: Transición a Orquestador Standalone v3 (ClawBot Style)
+FECHA: 2026-04-26
+MOTIVACIÓN: Independencia del Claude CLI y mayor control sobre el ciclo de vida del agente.
+CONTEXTO: El proyecto dependía de la infraestructura de Claude para la orquestación.
+SOLUCIÓN: Crear cli.py y StandardMcpBridge para ejecutar el sistema de forma autónoma.
+CONSECUENCIA: Aetheer ahora puede funcionar como servicio independiente o CLI profesional con Rich UI.
+ESTADO: implementado

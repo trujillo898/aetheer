@@ -53,6 +53,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Protocol
 
+from agents.attention_agent import AttentionAgent
 from agents.causal_validator import CausalRejection, validate_chains
 from agents.llm_agent import LLMAgent
 from agents.mcp_tool_registry import tools_for
@@ -73,6 +74,7 @@ from agents.quality_score import (
 )
 from agents.schemas import (
     AgentOutput,
+    AttentionContext,
     CausalChain,
     CognitiveQuery,
     CognitiveResponse,
@@ -80,6 +82,7 @@ from agents.schemas import (
     ExecutionMeta,
     GovernorDecision,
     QualityBreakdown,
+    RegimeInfo,
 )
 from services.cost_monitor import CostMonitor
 
@@ -138,6 +141,7 @@ class AetheerCognitiveAgent:
         self._enable_reflection = enable_reflection_loop
         self._fanout_timeout = fanout_timeout_seconds
         self._quality_floor = quality_floor
+        self._attention_agent = AttentionAgent(deps.client)
 
     # ───────────────────────── public API ─────────────────────────
 
@@ -165,10 +169,41 @@ class AetheerCognitiveAgent:
                 started_at=start,
             )
 
-        # 2. Specialist fan-out.
+        # 2. Attention & Regime phase.
+        total_cost = 0.0
+        # Fetch a quick snapshot for attention
+        try:
+            market_snapshot = await self._get_market_snapshot(query)
+            # Detect regime
+            regime = await self._detect_regime(market_snapshot)
+            # Determine attention
+            if query.attention_override:
+                attention = query.attention_override
+            else:
+                # Select model for attention via router
+                att_sel = self._deps.router.select(
+                    agent_name="attention",
+                    context_tokens=1000,
+                    expected_output_tokens=300,
+                    prefer_cheap=self._deps.cost_monitor.should_downgrade(),
+                    budget_remaining_usd=self._deps.cost_monitor.remaining_budget_usd()
+                )
+                # Temporarily update model_id for this call
+                self._attention_agent._model_id = att_sel.primary.id
+                attention = await self._attention_agent.get_attention(query, market_snapshot)
+        except Exception as e:
+            logger.error(f"Attention/Regime phase failed: {e}")
+            attention = AttentionContext(
+                dominant_theme="unknown",
+                attention_weights={a: 0.5 for a in SPECIALIST_AGENTS},
+                reasoning=f"Error: {e}"
+            )
+            regime = None
+
+        # 3. Specialist fan-out.
         try:
             agent_results = await asyncio.wait_for(
-                self._run_specialists(query),
+                self._run_specialists(query, attention, regime),
                 timeout=self._fanout_timeout,
             )
         except asyncio.TimeoutError:
@@ -176,40 +211,42 @@ class AetheerCognitiveAgent:
                 query,
                 rejection_reason=f"specialist fan-out timed out after {self._fanout_timeout}s",
                 started_at=start,
+                attention=attention,
+                regime=regime,
             )
         except BudgetExceededError as e:
             return self._offline_response(
                 query,
                 rejection_reason=f"BUDGET_EXCEEDED: {e}",
                 started_at=start,
+                attention=attention,
+                regime=regime,
             )
 
         agent_outputs: dict[str, AgentOutput] = {
             r.agent: r.output for r in agent_results if r.output is not None
         }
-        total_cost = sum(r.cost_usd for r in agent_results)
+        total_cost += sum(r.cost_usd for r in agent_results)
 
-        # 3. Optional reflection loop.
+        # 4. Optional reflection loop.
         reflection_notes: list[str] = []
         if self._enable_reflection and agent_outputs:
             notes, refl_cost = await self._run_reflection(query, agent_outputs)
             reflection_notes = notes
             total_cost += refl_cost
 
-        # 4. Bundle-level causal validation.
+        # 5. Bundle-level causal validation.
         all_chains: list[CausalChain] = [
             c for o in agent_outputs.values() for c in o.causal_chains
         ]
         kept_chains, rejected_chains = validate_chains(all_chains)
 
-        # 5. Build a contradictions list — for now the only structured source
-        #    is the reflection loop (governor consumes them too). Empty if
-        #    reflection is off; that's fine, consistency_score handles it.
+        # 6. Build a contradictions list.
         contradictions: list[Contradiction] = self._extract_contradictions(
             agent_outputs, reflection_notes
         )
 
-        # 6. Quality score.
+        # 7. Quality score.
         aetheer_snaps = self._collect_aetheer_snapshots(agent_outputs)
         quality = calculate_quality(
             agent_outputs=agent_outputs,
@@ -217,8 +254,7 @@ class AetheerCognitiveAgent:
             aetheer_snapshots=aetheer_snaps,
         )
 
-        # 7. Governor — but only if quality is above the hard floor. Below
-        #    the floor we deterministically refuse without burning a call.
+        # 8. Governor.
         if quality.global_score < self._quality_floor or not agent_outputs:
             return self._build_response(
                 approved=False,
@@ -227,6 +263,8 @@ class AetheerCognitiveAgent:
                 kept_chains=kept_chains,
                 rejected_chains=rejected_chains,
                 contradictions=contradictions,
+                attention=attention,
+                regime=regime,
                 rejection_reason=(
                     f"quality_score_global={quality.global_score:.2f} < "
                     f"floor={self._quality_floor:.2f}"
@@ -238,7 +276,7 @@ class AetheerCognitiveAgent:
             )
 
         gov_decision, gov_cost = await self._run_governor(
-            query, agent_outputs, kept_chains, contradictions, quality, rejected_chains
+            query, agent_outputs, kept_chains, contradictions, quality, rejected_chains, attention, regime
         )
         total_cost += gov_cost
 
@@ -250,6 +288,8 @@ class AetheerCognitiveAgent:
                 kept_chains=kept_chains,
                 rejected_chains=rejected_chains,
                 contradictions=gov_decision.contradictions,
+                attention=attention,
+                regime=regime,
                 rejection_reason=gov_decision.rejection_reason or "governor rejected",
                 synthesis_text=None,
                 cost_usd=total_cost,
@@ -257,10 +297,10 @@ class AetheerCognitiveAgent:
                 started_at=start,
             )
 
-        # 8. Synthesis.
+        # 9. Synthesis.
         try:
             synth_text, synth_cost = await self._run_synthesis(
-                query, agent_outputs, kept_chains, gov_decision
+                query, agent_outputs, kept_chains, gov_decision, attention, regime
             )
             total_cost += synth_cost
         except OpenRouterError as e:
@@ -272,6 +312,8 @@ class AetheerCognitiveAgent:
                 kept_chains=kept_chains,
                 rejected_chains=rejected_chains,
                 contradictions=gov_decision.contradictions,
+                attention=attention,
+                regime=regime,
                 rejection_reason=f"synthesis_failed: {e}",
                 synthesis_text=None,
                 cost_usd=total_cost,
@@ -286,6 +328,8 @@ class AetheerCognitiveAgent:
             kept_chains=kept_chains,
             rejected_chains=rejected_chains,
             contradictions=gov_decision.contradictions,
+            attention=attention,
+            regime=regime,
             rejection_reason=None,
             synthesis_text=synth_text,
             cost_usd=total_cost,
@@ -295,30 +339,79 @@ class AetheerCognitiveAgent:
 
     # ───────────────────────── internals ─────────────────────────
 
+    async def _get_market_snapshot(self, query: CognitiveQuery) -> dict:
+        """Fetch news and calendar for attention mechanism."""
+        # Parallel fetch news and calendar
+        results = await asyncio.gather(
+            self._deps.mcp.call_tool("tv_get_news", {"symbol": query.instruments[0] if query.instruments else "", "limit": 10}),
+            self._deps.mcp.call_tool("tv_get_economic_calendar", {"window_hours": 24}),
+            return_exceptions=True
+        )
+        
+        news = results[0] if not isinstance(results[0], Exception) else {}
+        calendar = results[1] if not isinstance(results[1], Exception) else {}
+        
+        return {
+            "news": news.get("news", []) if isinstance(news, dict) else [],
+            "calendar": calendar.get("events", []) if isinstance(calendar, dict) else [],
+            "price_summary": "DXY/EURUSD context" # Simple stub for now
+        }
+
+    async def _detect_regime(self, snapshot: dict) -> RegimeInfo | None:
+        """Call the regime detector MCP tool."""
+        try:
+            # For now we use calendar and news as proxy if we don't have deep price yet
+            result = await self._deps.mcp.call_tool("memory_detect_regime", {
+                "aetheer_per_pair_json": "{}", # placeholder
+                "use_recent_trades": True
+            })
+            if isinstance(result, str):
+                data = json.loads(result)
+            else:
+                data = result
+            
+            if "error" in data:
+                return None
+                
+            return RegimeInfo(
+                classification=data.get("regime", "transition"),
+                confidence=data.get("confidence", 0.5),
+                symptoms=data.get("symptoms", []),
+                recommendation=data.get("recommendation")
+            )
+        except Exception as e:
+            logger.warning(f"Regime detection tool call failed: {e}")
+            return None
+
     async def _run_specialists(
-        self, query: CognitiveQuery
+        self,
+        query: CognitiveQuery,
+        attention: AttentionContext,
+        regime: RegimeInfo | None,
     ) -> list[_AgentRunResult]:
         prefer_cheap = self._deps.cost_monitor.should_downgrade()
         budget_remaining = self._deps.cost_monitor.remaining_budget_usd()
         if self._deps.cost_monitor.should_block():
             raise BudgetExceededError("daily cap reached; refusing new calls")
 
-        # Pre-select per-agent. If any selection raises BudgetExceededError
-        # we propagate — the user sees a clean abort instead of a half-bundle.
+        # Pre-select per-agent.
         selections: dict[str, ModelSelection] = {}
         for name in SPECIALIST_AGENTS:
+            # OPTIMIZATION: if attention weight is very low, force cheap
+            weight = attention.attention_weights.get(name, 0.5)
+            force_cheap = prefer_cheap or (weight < 0.3)
+            
             selections[name] = self._deps.router.select(
                 agent_name=name,
-                context_tokens=4000,  # rough budget for system + task prompt
+                context_tokens=4000,
                 expected_output_tokens=800,
-                prefer_cheap=prefer_cheap,
+                prefer_cheap=force_cheap,
                 budget_remaining_usd=budget_remaining,
             )
 
-        # Fire all four in parallel. asyncio.gather + return_exceptions so
-        # one agent's failure doesn't kill the rest.
+        # Fire specialists in parallel.
         coros = [
-            self._run_one_specialist(name, selections[name], query)
+            self._run_one_specialist(name, selections[name], query, attention, regime)
             for name in SPECIALIST_AGENTS
         ]
         return await asyncio.gather(*coros)
@@ -328,6 +421,8 @@ class AetheerCognitiveAgent:
         agent_name: str,
         selection: ModelSelection,
         query: CognitiveQuery,
+        attention: AttentionContext,
+        regime: RegimeInfo | None,
     ) -> _AgentRunResult:
         t0 = time.monotonic()
         system_prompt = self._deps.prompt_loader.get_system_prompt(agent_name)
@@ -335,7 +430,18 @@ class AetheerCognitiveAgent:
 
         agent = LLMAgent(client=self._deps.client, name=agent_name)
         agent.add_system_prompt(system_prompt)
-        agent.add_message("user", _user_task_prompt(query, agent_name))
+        
+        # Add attention and regime context to the prompt
+        task_prompt = _user_task_prompt(query, agent_name)
+        task_prompt += f"\n\n## Market Context (Propagated by Orchestrator)\n"
+        task_prompt += f"Dominant Theme: {attention.dominant_theme}\n"
+        task_prompt += f"Attention Weight for {agent_name}: {attention.attention_weights.get(agent_name, 0.5):.2f}\n"
+        if regime:
+            task_prompt += f"Market Regime: {regime.classification} (confidence: {regime.confidence:.2f})\n"
+            if regime.recommendation:
+                task_prompt += f"Regime Recommendation: {regime.recommendation}\n"
+
+        agent.add_message("user", task_prompt)
 
         models = [selection.primary, *selection.fallbacks]
         last_exc: Exception | None = None
@@ -523,6 +629,8 @@ class AetheerCognitiveAgent:
         contradictions: list[Contradiction],
         quality: QualityBreakdown,
         rejected_chains: list[CausalRejection],
+        attention: AttentionContext,
+        regime: RegimeInfo | None,
     ) -> tuple[GovernorDecision, float]:
         sel = self._deps.router.select(
             agent_name="governor",
@@ -534,6 +642,10 @@ class AetheerCognitiveAgent:
         sys_prompt = self._deps.prompt_loader.get_system_prompt("governor")
 
         bundle = {
+            "market_context": {
+                "attention": attention.model_dump(),
+                "regime": regime.model_dump() if regime else None,
+            },
             "agents": {
                 n: {
                     "agent_version": o.agent_version,
@@ -644,6 +756,8 @@ class AetheerCognitiveAgent:
         agent_outputs: dict[str, AgentOutput],
         kept_chains: list[CausalChain],
         decision: GovernorDecision,
+        attention: AttentionContext,
+        regime: RegimeInfo | None,
     ) -> tuple[str, float]:
         sel = self._deps.router.select(
             agent_name="synthesis",
@@ -662,6 +776,10 @@ class AetheerCognitiveAgent:
             "Approved bundle:\n"
             + json.dumps(
                 {
+                    "market_context": {
+                        "attention": attention.model_dump(),
+                        "regime": regime.model_dump() if regime else None,
+                    },
                     "agents": {
                         n: o.payload for n, o in agent_outputs.items()
                     },
@@ -763,6 +881,8 @@ class AetheerCognitiveAgent:
         *,
         rejection_reason: str,
         started_at: float,
+        attention: AttentionContext | None = None,
+        regime: RegimeInfo | None = None,
     ) -> CognitiveResponse:
         empty_quality = QualityBreakdown(
             freshness=0.0, completeness=0.0, consistency=0.0,
@@ -775,6 +895,8 @@ class AetheerCognitiveAgent:
             quality=empty_quality,
             causal_chains=[],
             contradictions=[],
+            attention=attention,
+            regime=regime,
             rejection_reason=rejection_reason,
             synthesis_text=None,
             cost_usd=0.0,
@@ -792,6 +914,8 @@ class AetheerCognitiveAgent:
         kept_chains: list[CausalChain],
         rejected_chains: list[CausalRejection],
         contradictions: list[Contradiction],
+        attention: AttentionContext | None,
+        regime: RegimeInfo | None,
         rejection_reason: str | None,
         synthesis_text: str | None,
         cost_usd: float,
@@ -820,6 +944,8 @@ class AetheerCognitiveAgent:
             quality=quality,
             causal_chains=kept_chains,
             contradictions=merged_contradictions,
+            attention=attention,
+            regime=regime,
             rejection_reason=rejection_reason,
             synthesis_text=synthesis_text,
             cost_usd=round(cost_usd, 6),

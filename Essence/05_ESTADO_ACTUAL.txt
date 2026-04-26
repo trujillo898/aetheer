@@ -1,155 +1,58 @@
 AETHEER — ESTADO ACTUAL
 
-Última actualización: 19 abril 2026
+Última actualización: 26 abril 2026
 
 ================================================================================
 FASE ACTUAL
 ================================================================================
 
 Fase 1 (MVP): COMPLETADA — 14 abril 2026
-Fase 2 (mejoras de percepción + integridad): EN PROGRESO
+Fase 2 (mejoras de percepción + integridad): COMPLETADA — 26 abril 2026
+Fase 3 (v3 Standalone & Agentic): COMPLETADA — 26 abril 2026
 
-Tecnología: Claude Code + subagentes nativos + MCP servers Python + SQLite
-Nota: esta es la implementación sobre Claude Code. No define al sistema.
-
-================================================================================
-FASE 1 — IMPLEMENTADO Y FUNCIONANDO
-================================================================================
-
-[x] 6 subagentes en .claude/agents/:
-    liquidity, events, price-behavior, macro, context-orchestrator, synthesis
-
-[x] 5 MCP servers (Python):
-    price-feed, economic-calendar, macro-data, news-feed, memory
-
-[x] TradingView integrado directamente en price-feed (D010):
-    Conexión CDP nativa en Python (tv_bridge.py + tv_commands.py), sin Node.js
-    Cascada interna: TV CDP → Alpha Vantage → scraping
-    Nuevo: tools tv_health_check, get_chart_state, get_quote_tv en price-feed
-    Nuevo: deep_read como operación atómica interna (no coordinación entre MCPs)
-
-[x] Cache TTL en todos los MCP servers
-    Precio: 60s, Calendario: 30min, Macro: 15min, News: 10min
-
-[x] Pre-carga de calendario económico cada 6h
-
-[x] Test automatizado del Kill Switch (3/3 PASS)
-
-[x] Bootstrap unificado (scripts/bootstrap.sh)
-
-[x] Base de datos SQLite v2 con tablas:
-    price_snapshots, events, session_stats, context_memory,
-    user_profile, agent_outputs, heartbeat_log,
-    yields_history, feed_status, fedwatch_history
-
-[x] Configuración YAML: sources, decay, context-buffer
-
-[x] Fix alucinación temporal: scripts/now.py + tool get_current_time
-
-[x] FRED con cascada de fallback: Yahoo → TradingEconomics → FRED → yields_history
-
-[x] RSS feeds actualizados con monitoreo de salud
-
-[x] FedWatch con fallback: CME API JSON → scrape → history → manual
-
-[x] Bund/Gilt con fallback a yields_history
-
-[x] OANDA API eliminada del proyecto (D007)
-
-[x] TradingView MCP externo eliminado, reemplazado por CDP nativo (D010)
-
-[x] tv-unified como único MCP de datos de mercado (D013): consolidación de
-    price-feed + news-feed + economic-calendar en un solo server con cache
-    SQLite unificado (db/tv_cache.sqlite) y ventana stale de 30min.
-    .mcp.json reducido a 3 servers: tv-unified, macro-data, memory
-
-[x] Quality scores en price-feed (0.98 para TV, degradación por antigüedad)
-
-[x] Governor Agent implementado (D012): validación pre-output con quality_score
-    breakdown (Freshness 30%, Completeness 25%, Consistency 20%,
-    Source reliability 15%, Aetheer validity 10%) + gating binario a 0.60
-
-[x] Operating Modes binarios (D011): ONLINE / OFFLINE — supersede del modelo
-    original de 5 estados (FULL/DEGRADED_TRANSIENT/DEGRADED_PERSISTENT/MINIMAL/OFFLINE)
-    que resultó innecesariamente complejo en producción
-
-[x] JSON Schema para comunicación inter-agente
-
-[x] Análisis completo end-to-end verificado en producción
+Tecnología: Aetheer Standalone v3 (cli.py) + OpenRouter + MCP servers Python + SQLite
+Independencia: 100% independiente de Claude CLI.
 
 ================================================================================
-PENDIENTE — FASE 2
+FASE 1 & 2 — IMPLEMENTADO Y FUNCIONANDO
 ================================================================================
 
-[ ] D008: Lectura multi-símbolo vía tab switching (requiere TV Desktop con 3 tabs)
-[ ] D008: Lectura multi-timeframe vía chart_set_timeframe (D1, H4, H1, M15)
-[ ] D009: Indicador Pine Script "Aetheer Indicator" (tabla consolidada)
-[ ] Data Integrity Agent como gate formal (quality scores continuos)
-[ ] Confidence Service transversal (score desglosado por dimensión)
-[ ] Attention Mechanism (tema dominante del mercado, attention weights)
-[ ] Causal Engine formal (SCM con librería, no cadenas de texto)
-[ ] Regime Detection (risk-on/off, trending/ranging, crisis)
-[ ] Episodic Memory con grafos causales
-[ ] Learning Loop con Reflection Agent
+[x] 8 agentes cognitivos (Python):
+    attention, liquidity, events, price-behavior, macro, context-orchestrator, synthesis, governor
+
+[x] 3 MCP servers (Python):
+    tv-unified, macro-data, memory
+
+[x] Attention Mechanism (Bloque 3):
+    AttentionAgent implementado. Identifica tema dominante y asigna pesos de atención.
+
+[x] Regime Detection (Bloque 4):
+    Integrado en el flujo cognitivo principal. Clasificación trending/ranging/transition.
+
+[x] Data Integrity & Confidence (Bloque 2):
+    Quality score determinista (5 factores) + gating a 0.60.
+
+[x] Causal Engine & Episodic Memory (Bloque 4):
+    Causal chains obligatorias con invalid_condition. Trajectory store para aprendizaje.
+
+[x] v3 Standalone Orchestrator:
+    cli.py con Rich UI + StandardMcpBridge. Independencia total de Claude CLI.
+
+[x] Optimización de Costos:
+    Router dinámico basado en pesos de atención. Modelos NANO para baja prioridad.
 
 ================================================================================
-PROBLEMAS CONOCIDOS
+PRÓXIMAS PRIORIDADES — FASE 3+
 ================================================================================
 
-- get_quote_tv (CDP nativo) lee solo el chart activo.
-  Workaround: tab switching con deep_read (D008, pendiente de pruebas en vivo)
-- ForexFactory calendar scrape retorna 403 (Cloudflare bloquea).
-  Workaround: eventos vía input manual del trader.
-- El calendario tiene huecos de datos para algunas semanas.
+[ ] Integración de Computer Use (Agent-S) para interacción GUI avanzada en TradingView.
+[ ] Bucle de razonamiento autónomo (ReAct) para consultas complejas multi-paso.
+[ ] Interfaz Web v3 con streaming de análisis en tiempo real.
 
 ================================================================================
-BRECHA CON ARQUITECTURA OBJETIVO
+NOTAS TÉCNICAS
 ================================================================================
 
-Capa arquitectura        | Estado                           | Prioridad
--------------------------|----------------------------------|------------------
-Orchestrator Agent       | Parcial: synthesis + context-orch | MEDIA
-Perception Agents        | Implementado: 5 MCP servers      | Mejorar con D008/D009
-Data Integrity Agent     | Parcial: quality scores en precio | ALTA
-Interpretation Agents    | Implementado: 3 subagentes       | Mejorar con multi-TF
-Causal Engine            | Texto, no SCM formal             | REQUIERE DISEÑO
-Context Engine           | Parcial: context-orchestrator    | MEDIA
-Confidence Service       | NO EXISTE                        | ALTA
-Governor Agent           | Implementado (D007)              | HECHO
-Simulation Engine        | Parcial: escenarios sin kill cond | MEDIA
-Synthesis Agent          | Implementado: funcional          | Mejorar con Confidence
-Memory System            | SQLite v2, sin Episodic Memory   | REQUIERE DISEÑO
-Learning Loop            | NO EXISTE                        | BAJA
-Attention Mechanism      | NO EXISTE                        | REQUIERE DISEÑO
-Operating Modes          | Implementado (5 niveles)         | HECHO
-Regime Detection         | NO EXISTE                        | REQUIERE DISEÑO
-Multi-Model              | Todo es Claude                   | FUTURO (Fase 4)
-
-================================================================================
-PRÓXIMAS PRIORIDADES
-================================================================================
-
-Bloque 1 — Percepción mejorada (D008 + D009):
-  Tab switching + multi-timeframe + Pine indicator
-
-Bloque 2 — Integridad y confianza:
-  Data Integrity Agent formal + Confidence Service
-
-Bloque 3 — Causalidad formal (requiere diseño):
-  Causal Engine (SCM) + Regime Detection + Episodic Memory
-
-================================================================================
-NOTAS
-================================================================================
-
-- Fase 1 validada en producción el 14 de abril de 2026.
-- D010 (19 abril 2026): TradingView integrado nativamente en price-feed Python.
-  Paso intermedio antes de D013.
-- D011 (19 abril 2026): Operating Modes colapsados a binario ONLINE/OFFLINE.
-- D012 (19 abril 2026): quality_score breakdown formalizado en governor con
-  gating binario a 0.60 contra Operating Modes.
-- D013 (19 abril 2026): consolidación de 4 MCPs en tv-unified. Stack final:
-  3 MCP servers (tv-unified, macro-data, memory), cache SQLite único,
-  ventana stale 30min.
-- Todo corre sobre Claude Code. No limita decisiones futuras.
-- Actualizar este archivo después de cada implementación significativa.
+- El sistema ha migrado de una arquitectura dependiente de Claude a una arquitectura agéntica propia (Standalone).
+- El "Hard Cut" realizado el 26 de abril de 2026 eliminó la deuda técnica de la Fase 1 y consolidó la documentación.
+- Todos los componentes de los Bloques 2, 3, 4 y 5 de la Fase 2 están operativos.

@@ -1,25 +1,23 @@
 {
   "mcpServers": {
     "tv-unified": {
-      "command": "/home/thomas/aetheer/.venv/bin/python",
-      "args": ["/home/thomas/aetheer/mcp-servers/tv-unified/server.py"],
+      "command": "./.venv/bin/python",
+      "args": ["mcp-servers/tv-unified/server.py"],
       "env": {
         "TV_CDP_PORT": "9222",
-        "TV_CACHE_DB": "/home/thomas/aetheer/db/tv_cache.sqlite"
+        "TV_CACHE_DB": "db/tv_cache.sqlite"
       }
     },
     "macro-data": {
-      "command": "/home/thomas/aetheer/.venv/bin/python",
-      "args": ["/home/thomas/aetheer/mcp-servers/macro-data/server.py"],
-      "env": {
-        "FRED_API_KEY": "fb864195ca02554136668027ec536a00"
-      }
+      "command": "./.venv/bin/python",
+      "args": ["mcp-servers/macro-data/server.py"],
+      "env": {}
     },
     "memory": {
-      "command": "/home/thomas/aetheer/.venv/bin/python",
-      "args": ["/home/thomas/aetheer/mcp-servers/memory/server.py"],
+      "command": "./.venv/bin/python",
+      "args": ["mcp-servers/memory/server.py"],
       "env": {
-        "DB_PATH": "/home/thomas/aetheer/db/aetheer.db"
+        "DB_PATH": "db/aetheer.db"
       }
     }
   }

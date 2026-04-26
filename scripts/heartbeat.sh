@@ -34,15 +34,49 @@ done
 
 echo ""
 
-# Verificar agentes (incluye governor)
-echo "[AGENTS]"
-for agent in liquidity events price-behavior macro context-orchestrator synthesis governor; do
-    if [ -f ".claude/agents/$agent.md" ]; then
-        echo "  [OK] $agent"
-    else
-        echo "  [FAIL] $agent"
-    fi
-done
+# Verificar protocolo de agentes v3 (fuente de verdad)
+echo "[AGENT PROTOCOL]"
+python3 - <<'PY'
+import json
+import re
+from pathlib import Path
+
+proto = Path("docs/AGENT_PROTOCOL.json")
+required = {
+    "context-orchestrator",
+    "liquidity",
+    "events",
+    "price-behavior",
+    "macro",
+    "governor",
+    "synthesis",
+}
+semver = re.compile(r"^\d+\.\d+\.\d+$")
+
+if not proto.exists():
+    print("  [FAIL] docs/AGENT_PROTOCOL.json no encontrado")
+    raise SystemExit(1)
+
+doc = json.loads(proto.read_text(encoding="utf-8"))
+agents = doc.get("agents", [])
+by_name = {}
+for entry in agents:
+    name = entry.get("name")
+    version = str(entry.get("version", ""))
+    by_name[name] = version
+    if not semver.match(version):
+        print(f"  [FAIL] {name}: version inválida ({version})")
+        raise SystemExit(1)
+
+missing = sorted(required - set(by_name))
+if missing:
+    print(f"  [FAIL] faltan agentes en protocolo: {', '.join(missing)}")
+    raise SystemExit(1)
+
+print(f"  [OK] protocol_version={doc.get('protocol_version')}")
+for name in sorted(required):
+    print(f"  [OK] {name} v{by_name[name]}")
+PY
 
 echo ""
 
