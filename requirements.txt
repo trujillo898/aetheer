@@ -16,7 +16,22 @@ python-dotenv>=1.0.0
 # --- v3.0 orquestador (Fase 1) ---
 # OpenRouterClient depende solo de httpx (ya presente) para POST async.
 # pydantic se añadirá en Fase 2 cuando reemplacemos los JSON Schemas manuales.
+pydantic>=2.8.0
+
+# --- v3.0 scheduler (Fase 5) ---
+apscheduler>=3.11.0
+
+# --- v3.0 interfaces (Fase 6) ---
+fastapi>=0.115.0
+uvicorn>=0.30.0
+python-telegram-bot>=21.5
+redis>=5.0.8
+
+# --- v3.0 load tests (Fase 7) ---
+locust>=2.31.0
 
 # --- Testing (dev) ---
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
+pytest-cov>=5.0.0
+freezegun>=1.5.0

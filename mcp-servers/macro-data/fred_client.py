@@ -1,4 +1,4 @@
-"""FRED API client and macro data scrapers for Aetheer."""
+"""Macro-data client using FRED + TradingEconomics + local cache."""
 
 import logging
 import os
@@ -27,14 +27,11 @@ FRED_SERIES = {
     },
 }
 
-YAHOO_SYMBOLS = {
-    "gold": "GC=F",
-    "xauusd": "GC=F",
-    "vix": "^VIX",
-    "sp500": "^GSPC",
-    "wti": "CL=F",
-    "brent": "BZ=F",
-    "us_10y": "^TNX",
+FRED_CORRELATION_SERIES = {
+    "gold_xauusd": "GOLDAMGBD228NLBM",
+    "vix": "VIXCLS",
+    "sp500": "SP500",
+    "wti_crude": "DCOILWTICO",
 }
 
 
@@ -58,40 +55,18 @@ async def fetch_fred_series(series_id: str, limit: int = 5) -> dict | None:
             observations = data.get("observations", [])
             if observations:
                 latest = observations[0]
+                previous = None
+                if len(observations) > 1 and observations[1].get("value") not in {None, "."}:
+                    previous = float(observations[1]["value"])
                 return {
                     "series_id": series_id,
                     "value": float(latest["value"]) if latest["value"] != "." else None,
+                    "previous_value": previous,
                     "date": latest["date"],
                     "source": "FRED",
                 }
     except Exception as e:
         logger.warning(f"FRED API failed for {series_id}: {e}")
-    return None
-
-
-async def fetch_yahoo_quote(symbol: str) -> dict | None:
-    """Fetch a quote from Yahoo Finance."""
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=5d"
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, headers={"User-Agent": USER_AGENT}, timeout=10.0)
-            resp.raise_for_status()
-            data = resp.json()
-            meta = data["chart"]["result"][0]["meta"]
-            price = meta.get("regularMarketPrice", meta.get("previousClose"))
-            prev = meta.get("chartPreviousClose", meta.get("previousClose"))
-            if price is not None:
-                change_pct = ((price - prev) / prev * 100) if prev else 0
-                return {
-                    "symbol": symbol,
-                    "price": round(float(price), 4),
-                    "previous_close": round(float(prev), 4) if prev else None,
-                    "change_pct_24h": round(change_pct, 2),
-                    "source": "yahoo_finance",
-                    "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                }
-    except Exception as e:
-        logger.warning(f"Yahoo Finance failed for {symbol}: {e}")
     return None
 
 
@@ -188,10 +163,9 @@ async def get_yields() -> dict:
     """Get 10Y yields for US, Germany, UK with persistence and fallback.
 
     Cascada por bond:
-      1. Yahoo Finance (US 10Y only)
-      2. TradingEconomics (scraping)
-      3. FRED API (US yields only, si key configurada)
-      4. yields_history (último dato conocido, máx 72h)
+      1. TradingEconomics (scraping)
+      2. FRED API (US yields only, si key configurada)
+      3. yields_history (último dato conocido, máx 72h)
 
     Cada lectura exitosa se persiste en yields_history.
     """
@@ -199,33 +173,27 @@ async def get_yields() -> dict:
     sources_used = []
 
     # --- US 10Y ---
-    tnx = await fetch_yahoo_quote("^TNX")
-    if tnx:
-        results["us_10y"] = tnx["price"]
-        sources_used.append("yahoo")
-        _save_yield_to_history("us_10y", tnx["price"], "yahoo")
+    te = await scrape_tradingeconomics_yield("us_10y")
+    if te:
+        results["us_10y"] = te["yield_pct"]
+        sources_used.append("tradingeconomics")
+        _save_yield_to_history("us_10y", te["yield_pct"], "tradingeconomics")
     else:
-        te = await scrape_tradingeconomics_yield("us_10y")
-        if te:
-            results["us_10y"] = te["yield_pct"]
-            sources_used.append("tradingeconomics")
-            _save_yield_to_history("us_10y", te["yield_pct"], "tradingeconomics")
-        else:
-            if FRED_API_KEY:
-                fred_data = await fetch_fred_series("DGS10", limit=1)
-                if fred_data and fred_data["value"] is not None:
-                    results["us_10y"] = fred_data["value"]
-                    sources_used.append("fred")
-                    _save_yield_to_history("us_10y", fred_data["value"], "fred")
+        if FRED_API_KEY:
+            fred_data = await fetch_fred_series("DGS10", limit=1)
+            if fred_data and fred_data["value"] is not None:
+                results["us_10y"] = fred_data["value"]
+                sources_used.append("fred")
+                _save_yield_to_history("us_10y", fred_data["value"], "fred")
 
-            if "us_10y" not in results:
-                cached = _get_last_known_yield("us_10y")
-                if cached:
-                    results["us_10y"] = cached["yield_pct"]
-                    results["us_10y_age_hours"] = cached["age_hours"]
-                    sources_used.append(cached["source"])
-                else:
-                    results["us_10y"] = None
+        if "us_10y" not in results:
+            cached = _get_last_known_yield("us_10y")
+            if cached:
+                results["us_10y"] = cached["yield_pct"]
+                results["us_10y_age_hours"] = cached["age_hours"]
+                sources_used.append(cached["source"])
+            else:
+                results["us_10y"] = None
 
     # --- Bund 10Y (Germany) ---
     te = await scrape_tradingeconomics_yield("bund_10y")
@@ -269,38 +237,46 @@ async def get_yields() -> dict:
 
 
 async def get_correlations() -> dict:
-    """Get correlation assets: Gold, VIX, S&P500, WTI."""
+    """Get correlation assets from FRED time series when available."""
     assets = {}
+    sources_used: list[str] = []
+    for name, series_id in FRED_CORRELATION_SERIES.items():
+        series = await fetch_fred_series(series_id, limit=2)
+        if not series:
+            continue
+        value = series.get("value")
+        prev = series.get("previous_value")
+        if value is None:
+            continue
+        assets[name] = value
+        sources_used.append("fred")
 
-    for name, symbol in [("gold_xauusd", "GC=F"), ("vix", "^VIX"), ("sp500", "^GSPC"), ("wti_crude", "CL=F")]:
-        quote = await fetch_yahoo_quote(symbol)
-        if quote:
-            trend = "flat"
-            if quote["change_pct_24h"] > 0.3:
+        trend = "flat"
+        if isinstance(prev, float) and prev != 0:
+            change_pct = ((value - prev) / abs(prev)) * 100
+            if change_pct > 0.3:
                 trend = "up"
-            elif quote["change_pct_24h"] < -0.3:
+            elif change_pct < -0.3:
                 trend = "down"
+        assets[f"{name}_trend"] = trend
 
-            assets[name] = quote["price"]
-            assets[f"{name}_trend"] = trend
+        if name == "vix":
+            if value < 15:
+                assets["vix_regime"] = "risk_on"
+            elif value > 25:
+                assets["vix_regime"] = "risk_off"
+            else:
+                assets["vix_regime"] = "neutral"
+        if name == "wti_crude":
+            if value > 90:
+                assets["energy_inflation_pressure"] = "high"
+            elif value > 70:
+                assets["energy_inflation_pressure"] = "medium"
+            else:
+                assets["energy_inflation_pressure"] = "low"
 
-            if name == "vix":
-                if quote["price"] < 15:
-                    assets["vix_regime"] = "risk_on"
-                elif quote["price"] > 25:
-                    assets["vix_regime"] = "risk_off"
-                else:
-                    assets["vix_regime"] = "neutral"
-
-            if name == "wti_crude":
-                if quote["price"] > 90:
-                    assets["energy_inflation_pressure"] = "high"
-                elif quote["price"] > 70:
-                    assets["energy_inflation_pressure"] = "medium"
-                else:
-                    assets["energy_inflation_pressure"] = "low"
-
-    assets["source"] = "yahoo_finance"
+    assets["source"] = "fred" if sources_used else "none"
+    assets["sources_used"] = sources_used
     assets["timestamp_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return assets
 

@@ -176,3 +176,49 @@ CREATE TABLE IF NOT EXISTS _migrations (
     filename TEXT NOT NULL UNIQUE,
     applied_at TEXT DEFAULT (datetime('now'))
 );
+
+-- ============================================================
+-- trajectories: análisis completos para retrieval semántico
+-- (no reemplaza context_memory; lo extiende con casos completos
+-- query → mcp_data → causal chains → quality → feedback)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS trajectories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trace_id TEXT NOT NULL UNIQUE,
+    query_intent TEXT NOT NULL,
+    instruments_csv TEXT NOT NULL DEFAULT '',  -- 'EURUSD,GBPUSD' para filtros baratos
+    query_json TEXT NOT NULL,                  -- CognitiveQuery completo
+    response_json TEXT NOT NULL,               -- CognitiveResponse completo
+    mcp_data_json TEXT NOT NULL DEFAULT '{}',  -- snapshot de tv-unified
+    routing_json TEXT NOT NULL DEFAULT '{}',   -- {agent: {model_id, cost_usd, latency_ms}}
+    approved INTEGER NOT NULL DEFAULT 0,       -- 0|1
+    operating_mode TEXT NOT NULL,              -- ONLINE|OFFLINE
+    quality_score REAL NOT NULL DEFAULT 0.0,
+    user_feedback TEXT NOT NULL DEFAULT 'none' -- positive|negative|mixed|none
+        CHECK(user_feedback IN ('positive','negative','mixed','none')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_trajectories_intent
+    ON trajectories(query_intent, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trajectories_quality
+    ON trajectories(quality_score DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trajectories_approved
+    ON trajectories(approved, operating_mode);
+
+-- Embeddings se guardan en tabla separada porque:
+-- 1) suelen ser BLOBs grandes (1536 floats = 6KB+ por fila)
+-- 2) el vector model puede cambiar (versionado)
+-- 3) facilita rebuilds sin tocar la trayectoria principal
+CREATE TABLE IF NOT EXISTS trajectory_embeddings (
+    trajectory_id INTEGER PRIMARY KEY,
+    model TEXT NOT NULL,                       -- 'text-embedding-3-small' | 'stub-hash-v1'
+    dim INTEGER NOT NULL,
+    vector BLOB NOT NULL,                      -- float32 little-endian, length = dim*4
+    norm REAL NOT NULL,                        -- precomputed L2 norm para cosine rápido
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (trajectory_id) REFERENCES trajectories(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_trajectory_embeddings_model
+    ON trajectory_embeddings(model);

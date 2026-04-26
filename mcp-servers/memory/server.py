@@ -16,6 +16,7 @@ from mcp.server.fastmcp import FastMCP
 
 sys.path.insert(0, str(Path(__file__).parent))
 from compression import calculate_relevance_after_decay, compress_entry, should_compress
+from trajectory_store import AnalysisTrajectory, TrajectoryStore
 
 logging.basicConfig(level=logging.INFO, format="[memory] %(levelname)s %(message)s")
 logger = logging.getLogger("aetheer.memory")
@@ -49,6 +50,11 @@ def _init_db():
 
 # Initialize on import
 _init_db()
+
+
+def _trajectory_store() -> TrajectoryStore:
+    """Single shared store (cheap to construct; sqlite handles concurrency)."""
+    return TrajectoryStore(DB_PATH)
 
 
 VALID_TABLES = {
@@ -968,6 +974,141 @@ async def get_recent_trades(
         return json.dumps({"trades": rows, "stats": stats})
     except Exception as e:
         logger.error(f"get_recent_trades falló: {e}")
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def store_trajectory(trajectory_json: str) -> str:
+    """Persistir una trayectoria de análisis para retrieval semántico futuro.
+
+    Una trayectoria captura un análisis completo: query → MCP data → causal
+    chains → quality → routing → feedback. Permite que el router aprenda
+    qué modelos funcionaron en casos similares.
+
+    Política de persistencia (D-trayectoria):
+      - approved=True → se guarda.
+      - approved=False por OFFLINE/KILL_SWITCH/BUDGET → se guarda (diagnóstico).
+      - approved=False por quality_score_global < floor → NO se guarda
+        (ruido — synthesis ni siquiera corrió).
+
+    Args:
+        trajectory_json: JSON con shape AnalysisTrajectory:
+            { "trace_id": str,
+              "query": {CognitiveQuery dict},
+              "response": {CognitiveResponse dict},
+              "mcp_data_snapshot": {...},
+              "model_routing": {agent_name: {model_id, cost_usd, latency_ms}},
+              "user_feedback": "positive"|"negative"|"mixed"|"none" }
+
+    Returns:
+        JSON {status, trace_id, id} en éxito; {error, ...} en fallo.
+        Si la trayectoria fue rechazada por política, status="skipped".
+    """
+    try:
+        payload = json.loads(trajectory_json)
+    except json.JSONDecodeError as e:
+        return json.dumps({"error": f"Invalid JSON: {e}"})
+
+    try:
+        trajectory = AnalysisTrajectory.model_validate(payload)
+    except Exception as e:
+        return json.dumps({"error": f"Schema validation failed: {e}"})
+
+    store = _trajectory_store()
+    if not store.should_persist(trajectory.response):
+        return json.dumps({
+            "status": "skipped",
+            "trace_id": trajectory.trace_id,
+            "reason": "quality_floor_rejection",
+        })
+
+    try:
+        traj_id = await store.store(trajectory)
+        return json.dumps({
+            "status": "ok",
+            "id": traj_id,
+            "trace_id": trajectory.trace_id,
+        })
+    except Exception as e:
+        logger.error(f"store_trajectory failed: {e}")
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def retrieve_similar(
+    query_json: str,
+    k: int = 5,
+    min_quality: float = 0.70,
+    min_similarity: float = 0.30,
+    only_approved: bool = True,
+    same_intent: bool = True,
+) -> str:
+    """Recuperar casos similares a la query actual via cosine similarity.
+
+    Útil para que el orquestador y el router consulten "¿qué pasó la última
+    vez que se preguntó algo así?" y ajusten priors (modelo a usar, peso
+    de cada agente, expected quality).
+
+    Args:
+        query_json: JSON con campos de CognitiveQuery (al menos query_intent
+            y query_text; instruments/timeframes ayudan al filtro).
+        k: máximo de casos a devolver.
+        min_quality: floor de quality_score_global del caso recuperado.
+        min_similarity: umbral mínimo de cosine [0..1].
+        only_approved: si True, solo casos approved=True.
+        same_intent: si True, restringe al mismo query_intent (recomendado).
+
+    Returns:
+        JSON {results: [{similarity, trajectory: {...}}], count}.
+    """
+    try:
+        query = json.loads(query_json)
+    except json.JSONDecodeError as e:
+        return json.dumps({"error": f"Invalid JSON: {e}"})
+
+    if not isinstance(query, dict) or "query_intent" not in query:
+        return json.dumps({"error": "query_json must contain query_intent"})
+
+    try:
+        cases = await _trajectory_store().retrieve_similar(
+            query,
+            k=k,
+            min_quality=min_quality,
+            min_similarity=min_similarity,
+            only_approved=only_approved,
+            same_intent=same_intent,
+        )
+        return json.dumps({
+            "count": len(cases),
+            "results": [c.model_dump() for c in cases],
+        })
+    except Exception as e:
+        logger.error(f"retrieve_similar failed: {e}")
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def update_trajectory_feedback(trace_id: str, feedback: str) -> str:
+    """Actualizar el `user_feedback` de una trayectoria existente.
+
+    Args:
+        trace_id: identificador de la trayectoria.
+        feedback: "positive"|"negative"|"mixed"|"none".
+
+    Returns:
+        JSON {status, trace_id, updated}.
+    """
+    if feedback not in ("positive", "negative", "mixed", "none"):
+        return json.dumps({"error": f"Invalid feedback: {feedback}"})
+    try:
+        updated = _trajectory_store().update_feedback(trace_id, feedback)  # type: ignore[arg-type]
+        return json.dumps({
+            "status": "ok" if updated else "not_found",
+            "trace_id": trace_id,
+            "updated": updated,
+        })
+    except Exception as e:
+        logger.error(f"update_trajectory_feedback failed: {e}")
         return json.dumps({"error": str(e)})
 
 
